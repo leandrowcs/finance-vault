@@ -1,32 +1,49 @@
-# React + TypeScript + Vite
+# FinanceVault
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+App web para planejamento financeiro doméstico por pagamento quinzenal.
 
-Currently, two official plugins are available:
+## Local
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Firebase
+
+1. Crie um projeto no [Firebase Console](https://console.firebase.google.com/).
+2. Ative Authentication > Sign-in method > Google.
+3. Crie o Firestore Database em modo de produção.
+4. Cadastre um app Web e copie a configuração para `.env.local` usando `.env.example`.
+5. Adicione os domínios `localhost` e o domínio da Vercel em Authentication > Settings > Authorized domains.
+6. Substitua os dois placeholders de e-mail em `firestore.rules`.
+7. Substitua `YOUR_PROJECT_ID` pelo ID do projeto em `.firebaserc`.
+8. Instale o Firebase CLI e publique as regras:
+
+```bash
+npm install -g firebase-tools
+firebase login
+firebase use --add
+firebase deploy --only firestore:rules,firestore:indexes
+```
+
+As variáveis `VITE_*` não são segredos de servidor, mas devem ser configuradas também no ambiente de produção da Vercel.
+
+## Vercel
+
+1. Importe o repositório em [Vercel](https://vercel.com/new).
+2. Framework preset: `Vite`.
+3. Build command: `npm run build`.
+4. Output directory: `dist`.
+5. Adicione todas as variáveis de `.env.example` em Project Settings > Environment Variables para Preview e Production.
+6. Adicione o domínio final da Vercel aos domínios autorizados do Firebase.
+
+O `vercel.json` mantém o fallback das rotas SPA para `index.html`.
+
+## Validação
+
+```bash
+npm run typecheck
+npm run lint
+npm run build
+```
