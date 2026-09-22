@@ -1,0 +1,37 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function allowedEmail() {
+      return signedIn() && request.auth.token.email in [
+        'YOUR_EMAIL@example.com',
+        'YOUR_SPOUSE@example.com'
+      ];
+    }
+
+    function householdMember(householdId) {
+      return allowedEmail() && exists(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid));
+    }
+
+    match /households/{householdId} {
+      allow read: if householdMember(householdId);
+      allow create: if allowedEmail() && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if householdMember(householdId);
+      allow delete: if false;
+
+      match /members/{memberId} {
+        allow read: if householdMember(householdId);
+        allow write: if householdMember(householdId) && memberId == request.auth.uid;
+      }
+
+      match /{collection}/{documentId} {
+        allow read, write: if householdMember(householdId)
+          && collection in ['incomeSources', 'bills', 'payPeriods', 'billOccurrences', 'goals'];
+      }
+    }
+  }
+}
