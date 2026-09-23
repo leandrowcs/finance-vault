@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import "./App.css";
+import { activePeriod, financePeriods, totalIncome } from "./data/financeSeed";
 
 type Owner = "Você" | "Esposa" | "Compartilhado";
 type Bill = {
@@ -28,58 +29,13 @@ type Bill = {
   paid: boolean;
 };
 
-const initialBills: Bill[] = [
-  {
-    id: "rent",
-    name: "Aluguel",
-    owner: "Compartilhado",
-    amount: 1850,
-    due: "05 set",
-    category: "Casa",
-    paid: true,
-  },
-  {
-    id: "energy",
-    name: "Energia elétrica",
-    owner: "Você",
-    amount: 168.4,
-    due: "12 set",
-    category: "Casa",
-    paid: false,
-  },
-  {
-    id: "school",
-    name: "Escola das crianças",
-    owner: "Esposa",
-    amount: 620,
-    due: "15 set",
-    category: "Família",
-    paid: false,
-  },
-  {
-    id: "internet",
-    name: "Internet + streaming",
-    owner: "Compartilhado",
-    amount: 139.9,
-    due: "18 set",
-    category: "Casa",
-    paid: false,
-  },
-  {
-    id: "market",
-    name: "Mercado planejado",
-    owner: "Compartilhado",
-    amount: 480,
-    due: "20 set",
-    category: "Variáveis",
-    paid: false,
-  },
-];
-const payments = [
-  { date: "25 set", label: "Próximo pagamento", amount: 3250, status: "next" },
-  { date: "09 out", label: "Pagamento 20", amount: 3250, status: "upcoming" },
-  { date: "23 out", label: "Pagamento 21", amount: 3250, status: "upcoming" },
-];
+const initialBills: Bill[] = activePeriod.bills;
+const payments = financePeriods.map((period, index) => ({
+  date: period.label,
+  label: index === 0 ? "Pagamento recebido" : "Próximo pagamento",
+  amount: totalIncome(period),
+  status: index === 0 ? "upcoming" : "next",
+}));
 const currency = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
@@ -95,8 +51,10 @@ function App() {
       (total, bill) => total + reservedAmount(bill),
       0,
     );
-    return { reserved, liquid: 3250 - reserved };
+    return { reserved, liquid: totalIncome(activePeriod) - reserved };
   }, [bills]);
+  const periodIncome = totalIncome(activePeriod);
+  const commitmentPercent = Math.round((totals.reserved / periodIncome) * 100);
   const toggleBill = (id: string) =>
     setBills((current) =>
       current.map((bill) =>
@@ -109,9 +67,9 @@ function App() {
       <aside className={isMenuOpen ? "sidebar sidebar-open" : "sidebar"}>
         <div className="brand-row">
           <div className="brand-mark">
-            <WalletCards size={18} />
+            <img src="/icons/finance-vault-logo.svg" alt="" width="28" height="28" />
           </div>
-          <span>financevault</span>
+          <span>Finance Vault</span>
           <button
             className="icon-button mobile-close"
             type="button"
@@ -120,17 +78,6 @@ function App() {
           >
             <X size={18} />
           </button>
-        </div>
-        <div className="household-card">
-          <div className="avatar-stack">
-            <span>LC</span>
-            <span>MS</span>
-          </div>
-          <div>
-            <strong>Casa Lima</strong>
-            <small>Orçamento compartilhado</small>
-          </div>
-          <ChevronRight size={16} />
         </div>
         <nav className="main-nav" aria-label="Navegação principal">
           <span className="nav-label">Visão geral</span>
@@ -176,6 +123,14 @@ function App() {
           </div>
         </div>
       </aside>
+      {isMenuOpen && (
+        <button
+          className="sidebar-backdrop"
+          type="button"
+          aria-label="Fechar menu"
+          onClick={() => setIsMenuOpen(false)}
+        />
+      )}
       <section className="content" id="dashboard">
         <header className="topbar">
           <button
@@ -187,7 +142,6 @@ function App() {
             <Menu size={21} />
           </button>
           <div className="crumbs">
-            <span>Casa Lima</span>
             <ChevronRight size={14} />
             <strong>Dashboard</strong>
           </div>
@@ -222,14 +176,14 @@ function App() {
                 <span>Próximo pagamento</span>
                 <span className="status-pill">Em 3 dias</span>
               </div>
-              <strong>{currency.format(3250)}</strong>
+              <strong>{currency.format(periodIncome)}</strong>
               <p>
-                25 de setembro <span>•</span> salário do casal
+                {activePeriod.label} <span>•</span> salário do casal
               </p>
               <div className="progress-track">
-                <span style={{ width: "58%" }} />
+                <span style={{ width: `${commitmentPercent}%` }} />
               </div>
-              <small>58% já comprometido</small>
+              <small>{commitmentPercent}% já comprometido</small>
             </article>
             <article className="stat-card">
               <div className="stat-head">
@@ -237,7 +191,7 @@ function App() {
                 <ReceiptText size={18} />
               </div>
               <strong>{currency.format(totals.reserved)}</strong>
-              <p>de {currency.format(3250)} recebidos</p>
+              <p>de {currency.format(periodIncome)} recebidos</p>
               <div className="stat-footer">
                 <span className="mini-dot peach" />
                 {bills.length} contas previstas
@@ -328,7 +282,7 @@ function App() {
           <section className="panel bills-panel" id="bills">
             <div className="panel-heading">
               <div>
-                <p className="eyebrow">25 DE SETEMBRO</p>
+                <p className="eyebrow">{activePeriod.label.toUpperCase()}</p>
                 <h2>Contas deste pagamento</h2>
               </div>
               <button className="outline-button">
