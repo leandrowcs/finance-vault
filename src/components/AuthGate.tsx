@@ -35,5 +35,5 @@ export default function AuthGate() {
 
   const email = user.email?.toLowerCase() ?? ''
   if (!allowedEmails.includes(email)) return <AccessMessage title="Acesso não autorizado" detail="Esta conta Google não está autorizada neste orçamento." action={<button className="access-button secondary" type="button" onClick={() => { if (auth) void signOut(auth) }}>Sair</button>} />
-  return <App />
+  return <App user={user} onSignOut={() => auth ? signOut(auth) : Promise.resolve()} />
 }

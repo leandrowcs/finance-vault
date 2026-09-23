@@ -1,11 +1,14 @@
 import { useMemo, useState } from "react";
+import type { User } from "firebase/auth";
 import {
   ArrowUpRight,
   CalendarDays,
   Check,
+  ChevronLeft,
   ChevronRight,
   Circle,
   CircleCheck,
+  LogOut,
   Menu,
   Plus,
   ReceiptText,
@@ -80,11 +83,6 @@ const openedDateLabel = new Intl.DateTimeFormat("pt-BR", {
   day: "numeric",
   month: "long",
 }).format(openedAt);
-const calendarMonth = new Date(
-  openedAt.getFullYear(),
-  openedAt.getMonth(),
-  1,
-);
 const dateKey = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const dueDate = (periodDate: string, due: string) => {
@@ -92,30 +90,107 @@ const dueDate = (periodDate: string, due: string) => {
   const year = new Date(`${periodDate}T00:00:00`).getFullYear();
   return new Date(year, monthIndexes[month], Number(day));
 };
-const incomeDates = new Set(financePeriods.map((period) => period.date));
-const billDates = new Set(
-  financePeriods.flatMap((period) =>
-    period.bills.map((bill) => dateKey(dueDate(period.date, bill.due))),
-  ),
+const nextPaymentPeriod =
+  financePeriods.find(
+    (period) => new Date(`${period.date}T12:00:00`).getTime() >= new Date(
+      openedAt.getFullYear(),
+      openedAt.getMonth(),
+      openedAt.getDate(),
+      0,
+      0,
+      0,
+    ).getTime(),
+  ) ?? activePeriod;
+const nextPaymentDate = new Date(`${nextPaymentPeriod.date}T12:00:00`);
+const daysUntilNextPayment = Math.max(
+  0,
+  Math.ceil((nextPaymentDate.getTime() - openedAt.getTime()) / 86400000),
 );
-const calendarCells = Array.from(
-  {
-    length:
-      new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate() +
-      calendarMonth.getDay(),
-  },
-  (_, index) =>
-    index < calendarMonth.getDay()
-      ? null
-      : index - calendarMonth.getDay() + 1,
-);
+type CalendarItem = {
+  type: "income" | "bill";
+  title: string;
+  detail: string;
+  amount: number;
+};
 const reservedAmount = (bill: Bill) =>
   bill.owner === "Compartilhado" ? bill.amount / 2 : bill.amount;
 
-function App() {
+type AppProps = {
+  user?: User | null;
+  onSignOut?: () => Promise<void>;
+};
+
+function App({ user = null, onSignOut }: AppProps = {}) {
   const [bills, setBills] = useState(initialBills);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(
+    new Date(openedAt.getFullYear(), openedAt.getMonth(), 1),
+  );
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
+  const calendarCells = useMemo(() => {
+    const firstDay = calendarMonth.getDay();
+    const daysInMonth = new Date(
+      calendarMonth.getFullYear(),
+      calendarMonth.getMonth() + 1,
+      0,
+    ).getDate();
+    return Array.from({ length: firstDay + daysInMonth }, (_, index) =>
+      index < firstDay ? null : index - firstDay + 1,
+    );
+  }, [calendarMonth]);
+  const calendarItems = useMemo(() => {
+    const items = new Map<string, CalendarItem[]>();
+    const addItem = (date: string, item: CalendarItem) => {
+      const current = items.get(date) ?? [];
+      items.set(date, [...current, item]);
+    };
+    financePeriods.forEach((period) => {
+      addItem(period.date, {
+        type: "income",
+        title: "Receita do período",
+        detail: period.label,
+        amount: totalIncome(period),
+      });
+      period.bills.forEach((bill) => {
+        addItem(dateKey(dueDate(period.date, bill.due)), {
+          type: "bill",
+          title: bill.name,
+          detail: `${bill.category} · ${bill.owner}`,
+          amount: bill.amount,
+        });
+      });
+    });
+    return items;
+  }, []);
+  const selectedItems = selectedDay ? calendarItems.get(selectedDay) ?? [] : [];
+  const displayName = user?.displayName || user?.email || "Usuário";
+  const initials = displayName
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const changeCalendarMonth = (offset: number) => {
+    setCalendarMonth(
+      (current) => new Date(current.getFullYear(), current.getMonth() + offset, 1),
+    );
+    setSelectedDay(null);
+  };
+  const handleSignOut = async () => {
+    if (!onSignOut) return;
+    setIsSigningOut(true);
+    setSignOutError("");
+    try {
+      await onSignOut();
+    } catch {
+      setSignOutError("Não foi possível sair agora.");
+      setIsSigningOut(false);
+    }
+  };
   const totals = useMemo(() => {
     const reserved = bills.reduce(
       (total, bill) => total + reservedAmount(bill),
@@ -123,7 +198,7 @@ function App() {
     );
     return { reserved, liquid: totalIncome(activePeriod) - reserved };
   }, [bills]);
-  const periodIncome = totalIncome(activePeriod);
+  const periodIncome = totalIncome(nextPaymentPeriod);
   const commitmentPercent = Math.round((totals.reserved / periodIncome) * 100);
   const toggleBill = (id: string) =>
     setBills((current) =>
@@ -139,7 +214,7 @@ function App() {
           <div className="brand-mark">
             <img src="/icons/finance-vault-logo.svg" alt="" width="28" height="28" />
           </div>
-          <span>Finance Vault</span>
+          <span>Finance <strong>Vault</strong></span>
           <button
             className="icon-button mobile-close"
             type="button"
@@ -212,8 +287,7 @@ function App() {
             <Menu size={21} />
           </button>
           <div className="crumbs">
-            <ChevronRight size={14} />
-            <strong>Dashboard</strong>
+            Finance<strong>Vault</strong>
           </div>
           <div className="top-actions">
             <button
@@ -222,11 +296,20 @@ function App() {
               onClick={() => setIsCalendarOpen(true)}
             >
               <CalendarDays size={16} />
-                {`${monthLabels[calendarMonth.getMonth()]} ${calendarMonth.getFullYear()}`}
+              {`${monthLabels[calendarMonth.getMonth()]} ${calendarMonth.getFullYear()}`}
               <ChevronRight size={14} />
             </button>
-            <button className="profile-button" aria-label="Abrir perfil">
-              LC
+            <button
+              className="profile-button"
+              type="button"
+              aria-label="Abrir perfil"
+              onClick={() => setIsProfileOpen(true)}
+            >
+              {user?.photoURL ? (
+                <img src={user.photoURL} alt="" />
+              ) : (
+                initials
+              )}
             </button>
           </div>
         </header>
@@ -242,14 +325,33 @@ function App() {
                   Receitas e contas organizadas por data.
                 </p>
               </div>
-              <button
-                className="outline-button"
-                type="button"
-                onClick={() => setIsCalendarOpen(false)}
-              >
-                <ChevronRight size={16} />
-                Voltar ao dashboard
-              </button>
+              <div className="calendar-actions">
+                <button
+                  className="icon-button calendar-nav-button"
+                  type="button"
+                  aria-label="Mês anterior"
+                  title="Mês anterior"
+                  onClick={() => changeCalendarMonth(-1)}
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <button
+                  className="icon-button calendar-nav-button"
+                  type="button"
+                  aria-label="Próximo mês"
+                  title="Próximo mês"
+                  onClick={() => changeCalendarMonth(1)}
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <button
+                  className="outline-button"
+                  type="button"
+                  onClick={() => setIsCalendarOpen(false)}
+                >
+                  Voltar ao dashboard
+                </button>
+              </div>
             </div>
             <div className="calendar-legend" aria-label="Legenda do calendário">
               <span><i className="calendar-dot income" /> Receita</span>
@@ -267,25 +369,89 @@ function App() {
                   day,
                 );
                 const key = dateKey(currentDate);
-                const hasIncome = incomeDates.has(key);
-                const hasBill = billDates.has(key);
+                const dayItems = calendarItems.get(key) ?? [];
+                const hasIncome = dayItems.some((item) => item.type === "income");
+                const hasBill = dayItems.some((item) => item.type === "bill");
                 return (
-                  <span
+                  <button
+                    type="button"
                     className={`calendar-day${hasIncome ? " income-day" : ""}${hasBill ? " bill-day" : ""}`}
                     key={key}
+                    onClick={() => setSelectedDay(key)}
                   >
                     <strong>{day}</strong>
-                    {(hasIncome || hasBill) && (
+                    {dayItems.length > 0 && (
                       <span className="calendar-markers">
                         {hasIncome && <i className="calendar-dot income" />}
                         {hasBill && <i className="calendar-dot bill" />}
                       </span>
                     )}
-                  </span>
+                  </button>
                 );
               })}
             </div>
+            {selectedItems.length > 0 && selectedDay && (
+              <div className="calendar-details">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">DETALHES DO DIA</p>
+                    <h2>
+                      {new Intl.DateTimeFormat("pt-BR", {
+                        weekday: "long",
+                        day: "numeric",
+                        month: "long",
+                      }).format(new Date(`${selectedDay}T12:00:00`))}
+                    </h2>
+                  </div>
+                </div>
+                <div className="calendar-detail-list">
+                  {selectedItems.map((item, index) => (
+                    <div className="calendar-detail-row" key={`${item.title}-${index}`}>
+                      <span className={`calendar-dot ${item.type}`} />
+                      <div>
+                        <strong>{item.title}</strong>
+                        <small>{item.detail}</small>
+                      </div>
+                      <strong>{currency.format(item.amount)}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
+        )}
+        {isProfileOpen && (
+          <div className="profile-modal-layer">
+            <button
+              className="profile-modal-backdrop"
+              type="button"
+              aria-label="Fechar perfil"
+              onClick={() => setIsProfileOpen(false)}
+            />
+            <section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+              <button
+                className="icon-button profile-modal-close"
+                type="button"
+                aria-label="Fechar perfil"
+                onClick={() => setIsProfileOpen(false)}
+              >
+                <X size={18} />
+              </button>
+              <div className="profile-modal-avatar">
+                {user?.photoURL ? <img src={user.photoURL} alt="" /> : initials}
+              </div>
+              <p className="eyebrow">PERFIL</p>
+              <h2 id="profile-title">{displayName}</h2>
+              <p className="profile-email">{user?.email ?? "Conta local"}</p>
+              {signOutError && <p className="profile-error">{signOutError}</p>}
+              {onSignOut && (
+                <button className="access-button profile-signout" type="button" onClick={() => void handleSignOut()} disabled={isSigningOut}>
+                  <LogOut size={16} />
+                  {isSigningOut ? "Saindo..." : "Sair da conta"}
+                </button>
+              )}
+            </section>
+          </div>
         )}
         <div className={isCalendarOpen ? "page-wrap dashboard-hidden" : "page-wrap"}>
           <div className="page-heading">
@@ -305,7 +471,11 @@ function App() {
             <article className="stat-card accent-card">
               <div className="stat-head">
                 <span>Próximo pagamento</span>
-                <span className="status-pill">Em 3 dias</span>
+                <span className="status-pill">
+                  {daysUntilNextPayment === 0
+                    ? "Hoje"
+                    : `Em ${daysUntilNextPayment} dias`}
+                </span>
               </div>
               <strong>{currency.format(periodIncome)}</strong>
               <p>
