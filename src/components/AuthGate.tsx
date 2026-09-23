@@ -30,8 +30,8 @@ export default function AuthGate() {
     return <App />
   }
 
-  if (loading) return <AccessMessage title="Abrindo sua casa" detail="Verificando sua sessão segura..." />
-  if (!user) return <AccessMessage title="Entre na sua casa" detail={error || 'Use sua conta Google autorizada para acessar o Finance Vault.'} action={<button className="access-button" type="button" onClick={() => { setError(''); if (auth) void signInWithPopup(auth, googleProvider).catch(() => setError('Não foi possível concluir o login.')) }}>Entrar com Google</button>} />
+  if (loading) return <AccessMessage title="Abrindo suas contas" detail="Verificando sua sessão segura..." />
+  if (!user) return <AccessMessage title="Acesse suas contas" detail={error || 'Use sua conta Google autorizada para acessar o Finance Vault.'} action={<button className="access-button" type="button" onClick={() => { setError(''); if (auth) void signInWithPopup(auth, googleProvider).catch(() => setError('Não foi possível concluir o login.')) }}>Entrar com Google</button>} />
 
   const email = user.email?.toLowerCase() ?? ''
   if (!allowedEmails.includes(email)) return <AccessMessage title="Acesso não autorizado" detail="Esta conta Google não está autorizada neste orçamento." action={<button className="access-button secondary" type="button" onClick={() => { if (auth) void signOut(auth) }}>Sair</button>} />

@@ -40,12 +40,82 @@ const currency = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
 });
+const openedAt = new Date();
+const monthLabels = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro",
+];
+const monthIndexes: Record<string, number> = {
+  jan: 0,
+  fev: 1,
+  mar: 2,
+  abr: 3,
+  mai: 4,
+  jun: 5,
+  jul: 6,
+  ago: 7,
+  set: 8,
+  out: 9,
+  nov: 10,
+  dez: 11,
+};
+const greeting =
+  openedAt.getHours() < 12
+    ? "Bom dia"
+    : openedAt.getHours() < 18
+      ? "Boa tarde"
+      : "Boa noite";
+const openedDateLabel = new Intl.DateTimeFormat("pt-BR", {
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+}).format(openedAt);
+const calendarMonth = new Date(
+  openedAt.getFullYear(),
+  openedAt.getMonth(),
+  1,
+);
+const dateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const dueDate = (periodDate: string, due: string) => {
+  const [day, month] = due.split(" ");
+  const year = new Date(`${periodDate}T00:00:00`).getFullYear();
+  return new Date(year, monthIndexes[month], Number(day));
+};
+const incomeDates = new Set(financePeriods.map((period) => period.date));
+const billDates = new Set(
+  financePeriods.flatMap((period) =>
+    period.bills.map((bill) => dateKey(dueDate(period.date, bill.due))),
+  ),
+);
+const calendarCells = Array.from(
+  {
+    length:
+      new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate() +
+      calendarMonth.getDay(),
+  },
+  (_, index) =>
+    index < calendarMonth.getDay()
+      ? null
+      : index - calendarMonth.getDay() + 1,
+);
 const reservedAmount = (bill: Bill) =>
   bill.owner === "Compartilhado" ? bill.amount / 2 : bill.amount;
 
 function App() {
   const [bills, setBills] = useState(initialBills);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const totals = useMemo(() => {
     const reserved = bills.reduce(
       (total, bill) => total + reservedAmount(bill),
@@ -146,9 +216,13 @@ function App() {
             <strong>Dashboard</strong>
           </div>
           <div className="top-actions">
-            <button className="period-button">
+            <button
+              className="period-button"
+              type="button"
+              onClick={() => setIsCalendarOpen(true)}
+            >
               <CalendarDays size={16} />
-              Setembro 2026
+                {`${monthLabels[calendarMonth.getMonth()]} ${calendarMonth.getFullYear()}`}
               <ChevronRight size={14} />
             </button>
             <button className="profile-button" aria-label="Abrir perfil">
@@ -156,13 +230,70 @@ function App() {
             </button>
           </div>
         </header>
-        <div className="page-wrap">
+        {isCalendarOpen && (
+          <section className="calendar-page" aria-label="Calendário financeiro">
+            <div className="page-heading calendar-heading">
+              <div>
+                <p className="eyebrow">CALENDÁRIO FINANCEIRO</p>
+                <h1>
+                  {monthLabels[calendarMonth.getMonth()]} {calendarMonth.getFullYear()}
+                </h1>
+                <p className="heading-copy">
+                  Receitas e contas organizadas por data.
+                </p>
+              </div>
+              <button
+                className="outline-button"
+                type="button"
+                onClick={() => setIsCalendarOpen(false)}
+              >
+                <ChevronRight size={16} />
+                Voltar ao dashboard
+              </button>
+            </div>
+            <div className="calendar-legend" aria-label="Legenda do calendário">
+              <span><i className="calendar-dot income" /> Receita</span>
+              <span><i className="calendar-dot bill" /> Conta a pagar</span>
+            </div>
+            <div className="calendar-grid">
+              {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((day) => (
+                <span className="calendar-weekday" key={day}>{day}</span>
+              ))}
+              {calendarCells.map((day, index) => {
+                if (!day) return <span className="calendar-day empty" key={`empty-${index}`} />;
+                const currentDate = new Date(
+                  calendarMonth.getFullYear(),
+                  calendarMonth.getMonth(),
+                  day,
+                );
+                const key = dateKey(currentDate);
+                const hasIncome = incomeDates.has(key);
+                const hasBill = billDates.has(key);
+                return (
+                  <span
+                    className={`calendar-day${hasIncome ? " income-day" : ""}${hasBill ? " bill-day" : ""}`}
+                    key={key}
+                  >
+                    <strong>{day}</strong>
+                    {(hasIncome || hasBill) && (
+                      <span className="calendar-markers">
+                        {hasIncome && <i className="calendar-dot income" />}
+                        {hasBill && <i className="calendar-dot bill" />}
+                      </span>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+          </section>
+        )}
+        <div className={isCalendarOpen ? "page-wrap dashboard-hidden" : "page-wrap"}>
           <div className="page-heading">
             <div>
-              <p className="eyebrow">TERÇA-FEIRA, 22 DE SETEMBRO</p>
-              <h1>Boa noite, Leandro.</h1>
+              <p className="eyebrow">{openedDateLabel.toUpperCase()}</p>
+              <h1>{greeting}, Leandro.</h1>
               <p className="heading-copy">
-                Aqui está o pulso financeiro da casa para o próximo pagamento.
+                Aqui está o pulso financeiro das suas contas para o próximo pagamento.
               </p>
             </div>
             <button className="primary-button">
@@ -178,7 +309,7 @@ function App() {
               </div>
               <strong>{currency.format(periodIncome)}</strong>
               <p>
-                {activePeriod.label} <span>•</span> salário do casal
+                {activePeriod.label} <span>•</span> receita do período
               </p>
               <div className="progress-track">
                 <span style={{ width: `${commitmentPercent}%` }} />
@@ -241,7 +372,7 @@ function App() {
                       <strong>{payment.label}</strong>
                       <span>
                         {payment.status === "next"
-                          ? "Salário do casal"
+                          ? "Receita do período"
                           : "Salários + recorrentes"}
                       </span>
                     </div>
@@ -264,7 +395,7 @@ function App() {
               <p className="eyebrow">OBJETIVO DO MÊS</p>
               <h2>Reserva de emergência</h2>
               <p className="goal-copy">
-                Cada pagamento deixa a casa um pouco mais tranquila.
+                Cada pagamento deixa suas contas um pouco mais tranquilas.
               </p>
               <div className="goal-value">
                 <strong>{currency.format(780)}</strong>
