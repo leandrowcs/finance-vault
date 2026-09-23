@@ -1,4 +1,4 @@
-# FinanceVault
+# Finance Vault
 
 App web para planejamento financeiro doméstico por pagamento quinzenal.
 

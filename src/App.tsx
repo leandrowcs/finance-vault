@@ -1,35 +1,400 @@
-import { useMemo, useState } from 'react'
-import { ArrowUpRight, CalendarDays, Check, ChevronRight, Circle, CircleCheck, Menu, Plus, ReceiptText, Settings2, Sparkles, Users, WalletCards, X } from 'lucide-react'
-import './App.css'
+import { useMemo, useState } from "react";
+import {
+  ArrowUpRight,
+  CalendarDays,
+  Check,
+  ChevronRight,
+  Circle,
+  CircleCheck,
+  Menu,
+  Plus,
+  ReceiptText,
+  Settings2,
+  Sparkles,
+  Users,
+  WalletCards,
+  X,
+} from "lucide-react";
+import "./App.css";
 
-type Owner = 'Você' | 'Esposa' | 'Compartilhado'
-type Bill = { id: string; name: string; owner: Owner; amount: number; due: string; category: string; paid: boolean }
+type Owner = "Você" | "Esposa" | "Compartilhado";
+type Bill = {
+  id: string;
+  name: string;
+  owner: Owner;
+  amount: number;
+  due: string;
+  category: string;
+  paid: boolean;
+};
 
 const initialBills: Bill[] = [
-  { id: 'rent', name: 'Aluguel', owner: 'Compartilhado', amount: 1850, due: '05 set', category: 'Casa', paid: true },
-  { id: 'energy', name: 'Energia elétrica', owner: 'Você', amount: 168.4, due: '12 set', category: 'Casa', paid: false },
-  { id: 'school', name: 'Escola das crianças', owner: 'Esposa', amount: 620, due: '15 set', category: 'Família', paid: false },
-  { id: 'internet', name: 'Internet + streaming', owner: 'Compartilhado', amount: 139.9, due: '18 set', category: 'Casa', paid: false },
-  { id: 'market', name: 'Mercado planejado', owner: 'Compartilhado', amount: 480, due: '20 set', category: 'Variáveis', paid: false },
-]
-const payments = [{ date: '25 set', label: 'Próximo pagamento', amount: 3250, status: 'next' }, { date: '09 out', label: 'Pagamento 20', amount: 3250, status: 'upcoming' }, { date: '23 out', label: 'Pagamento 21', amount: 3250, status: 'upcoming' }]
-const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
-const reservedAmount = (bill: Bill) => bill.owner === 'Compartilhado' ? bill.amount / 2 : bill.amount
+  {
+    id: "rent",
+    name: "Aluguel",
+    owner: "Compartilhado",
+    amount: 1850,
+    due: "05 set",
+    category: "Casa",
+    paid: true,
+  },
+  {
+    id: "energy",
+    name: "Energia elétrica",
+    owner: "Você",
+    amount: 168.4,
+    due: "12 set",
+    category: "Casa",
+    paid: false,
+  },
+  {
+    id: "school",
+    name: "Escola das crianças",
+    owner: "Esposa",
+    amount: 620,
+    due: "15 set",
+    category: "Família",
+    paid: false,
+  },
+  {
+    id: "internet",
+    name: "Internet + streaming",
+    owner: "Compartilhado",
+    amount: 139.9,
+    due: "18 set",
+    category: "Casa",
+    paid: false,
+  },
+  {
+    id: "market",
+    name: "Mercado planejado",
+    owner: "Compartilhado",
+    amount: 480,
+    due: "20 set",
+    category: "Variáveis",
+    paid: false,
+  },
+];
+const payments = [
+  { date: "25 set", label: "Próximo pagamento", amount: 3250, status: "next" },
+  { date: "09 out", label: "Pagamento 20", amount: 3250, status: "upcoming" },
+  { date: "23 out", label: "Pagamento 21", amount: 3250, status: "upcoming" },
+];
+const currency = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+});
+const reservedAmount = (bill: Bill) =>
+  bill.owner === "Compartilhado" ? bill.amount / 2 : bill.amount;
 
 function App() {
-  const [bills, setBills] = useState(initialBills)
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [bills, setBills] = useState(initialBills);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const totals = useMemo(() => {
-    const reserved = bills.reduce((total, bill) => total + reservedAmount(bill), 0)
-    return { reserved, liquid: 3250 - reserved }
-  }, [bills])
-  const toggleBill = (id: string) => setBills((current) => current.map((bill) => (bill.id === id ? { ...bill, paid: !bill.paid } : bill)))
+    const reserved = bills.reduce(
+      (total, bill) => total + reservedAmount(bill),
+      0,
+    );
+    return { reserved, liquid: 3250 - reserved };
+  }, [bills]);
+  const toggleBill = (id: string) =>
+    setBills((current) =>
+      current.map((bill) =>
+        bill.id === id ? { ...bill, paid: !bill.paid } : bill,
+      ),
+    );
 
   return (
     <main className="app-shell">
-      <aside className={isMenuOpen ? 'sidebar sidebar-open' : 'sidebar'}><div className="brand-row"><div className="brand-mark"><WalletCards size={18} /></div><span>financevault</span><button className="icon-button mobile-close" type="button" aria-label="Fechar menu" onClick={() => setIsMenuOpen(false)}><X size={18} /></button></div><div className="household-card"><div className="avatar-stack"><span>LC</span><span>MS</span></div><div><strong>Casa Lima</strong><small>Orçamento compartilhado</small></div><ChevronRight size={16} /></div><nav className="main-nav" aria-label="Navegação principal"><span className="nav-label">Visão geral</span><a className="nav-link active" href="#dashboard"><WalletCards size={17} />Dashboard</a><a className="nav-link" href="#payments"><CalendarDays size={17} />Pagamentos<span className="nav-count">26</span></a><a className="nav-link" href="#bills"><ReceiptText size={17} />Contas<span className="nav-count">12</span></a><span className="nav-label spaced">Planejamento</span><a className="nav-link" href="#income"><ArrowUpRight size={17} />Receitas</a><a className="nav-link" href="#goals"><Sparkles size={17} />Objetivos</a></nav><div className="sidebar-bottom"><a className="nav-link" href="#members"><Users size={17} />Membros</a><a className="nav-link" href="#settings"><Settings2 size={17} />Configurações</a><div className="secure-note"><span><Check size={13} /></span><p><strong>Seus dados estão seguros</strong><small>Sincronizado agora</small></p></div></div></aside>
-      <section className="content" id="dashboard"><header className="topbar"><button className="icon-button menu-trigger" type="button" aria-label="Abrir menu" onClick={() => setIsMenuOpen(true)}><Menu size={21} /></button><div className="crumbs"><span>Casa Lima</span><ChevronRight size={14} /><strong>Dashboard</strong></div><div className="top-actions"><button className="period-button"><CalendarDays size={16} />Setembro 2026<ChevronRight size={14} /></button><button className="profile-button" aria-label="Abrir perfil">LC</button></div></header><div className="page-wrap"><div className="page-heading"><div><p className="eyebrow">TERÇA-FEIRA, 22 DE SETEMBRO</p><h1>Boa noite, Leandro.</h1><p className="heading-copy">Aqui está o pulso financeiro da casa para o próximo pagamento.</p></div><button className="primary-button"><Plus size={17} />Adicionar movimento</button></div><section className="stats-grid" aria-label="Resumo financeiro"><article className="stat-card accent-card"><div className="stat-head"><span>Próximo pagamento</span><span className="status-pill">Em 3 dias</span></div><strong>{currency.format(3250)}</strong><p>25 de setembro <span>•</span> salário do casal</p><div className="progress-track"><span style={{ width: '58%' }} /></div><small>58% já comprometido</small></article><article className="stat-card"><div className="stat-head"><span>Contas reservadas</span><ReceiptText size={18} /></div><strong>{currency.format(totals.reserved)}</strong><p>de {currency.format(3250)} recebidos</p><div className="stat-footer"><span className="mini-dot peach" />{bills.length} contas previstas</div></article><article className="stat-card"><div className="stat-head"><span>Saldo líquido</span><ArrowUpRight size={18} /></div><strong className="positive">{currency.format(totals.liquid)}</strong><p>disponível após compromissos</p><div className="stat-footer"><span className="mini-dot mint" />+12,4% vs. pagamento anterior</div></article></section><div className="content-grid"><section className="panel payments-panel" id="payments"><div className="panel-heading"><div><p className="eyebrow">FLUXO DE CAIXA</p><h2>Próximos pagamentos</h2></div><button className="text-button">Ver calendário <ChevronRight size={15} /></button></div><div className="payment-list">{payments.map((payment) => <div className={payment.status === 'next' ? 'payment-row next-payment' : 'payment-row'} key={payment.date}><div className="date-block"><strong>{payment.date.split(' ')[0]}</strong><span>SET/OUT</span></div><div className="payment-info"><strong>{payment.label}</strong><span>{payment.status === 'next' ? 'Salário do casal' : 'Salários + recorrentes'}</span></div><strong className="payment-amount">{currency.format(payment.amount)}</strong><ChevronRight size={17} /></div>)}</div><button className="add-payment"><Plus size={16} />Planejar outro pagamento</button></section><section className="panel goal-panel" id="goals"><div className="goal-orbit"><Sparkles size={20} /></div><p className="eyebrow">OBJETIVO DO MÊS</p><h2>Reserva de emergência</h2><p className="goal-copy">Cada pagamento deixa a casa um pouco mais tranquila.</p><div className="goal-value"><strong>{currency.format(780)}</strong><span>de {currency.format(2000)}</span></div><div className="goal-track"><span style={{ width: '39%' }} /></div><div className="goal-footer"><span>39% concluído</span><ArrowUpRight size={16} /></div></section></div><section className="panel bills-panel" id="bills"><div className="panel-heading"><div><p className="eyebrow">25 DE SETEMBRO</p><h2>Contas deste pagamento</h2></div><button className="outline-button"><Plus size={16} />Nova conta</button></div><div className="bill-table"><div className="table-head"><span>Conta</span><span>Responsável</span><span>Vencimento</span><span>Valor</span><span>Status</span></div>{bills.map((bill) => <div className="bill-row" key={bill.id}><div className="bill-name"><button className={bill.paid ? 'check-control checked' : 'check-control'} type="button" aria-label={bill.paid ? `Desmarcar ${bill.name}` : `Marcar ${bill.name} como paga`} onClick={() => toggleBill(bill.id)}>{bill.paid ? <CircleCheck size={20} /> : <Circle size={20} />}</button><div><strong>{bill.name}</strong><small>{bill.category}</small></div></div><span className="owner-label">{bill.owner}</span><span className="due-label">{bill.due}</span><strong className={bill.paid ? 'bill-amount muted' : 'bill-amount'}>{currency.format(bill.amount)}</strong><span className={bill.paid ? 'bill-status paid' : 'bill-status'}>{bill.paid ? 'Paga' : 'Pendente'}</span></div>)}</div></section><footer className="app-footer"><span>FinanceVault</span><span>Seu dinheiro, no mesmo plano.</span><span>Última sincronização: agora</span></footer></div></section></main>
-  )
+      <aside className={isMenuOpen ? "sidebar sidebar-open" : "sidebar"}>
+        <div className="brand-row">
+          <div className="brand-mark">
+            <WalletCards size={18} />
+          </div>
+          <span>financevault</span>
+          <button
+            className="icon-button mobile-close"
+            type="button"
+            aria-label="Fechar menu"
+            onClick={() => setIsMenuOpen(false)}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="household-card">
+          <div className="avatar-stack">
+            <span>LC</span>
+            <span>MS</span>
+          </div>
+          <div>
+            <strong>Casa Lima</strong>
+            <small>Orçamento compartilhado</small>
+          </div>
+          <ChevronRight size={16} />
+        </div>
+        <nav className="main-nav" aria-label="Navegação principal">
+          <span className="nav-label">Visão geral</span>
+          <a className="nav-link active" href="#dashboard">
+            <WalletCards size={17} />
+            Dashboard
+          </a>
+          <a className="nav-link" href="#payments">
+            <CalendarDays size={17} />
+            Pagamentos<span className="nav-count">26</span>
+          </a>
+          <a className="nav-link" href="#bills">
+            <ReceiptText size={17} />
+            Contas<span className="nav-count">12</span>
+          </a>
+          <span className="nav-label spaced">Planejamento</span>
+          <a className="nav-link" href="#income">
+            <ArrowUpRight size={17} />
+            Receitas
+          </a>
+          <a className="nav-link" href="#goals">
+            <Sparkles size={17} />
+            Objetivos
+          </a>
+        </nav>
+        <div className="sidebar-bottom">
+          <a className="nav-link" href="#members">
+            <Users size={17} />
+            Membros
+          </a>
+          <a className="nav-link" href="#settings">
+            <Settings2 size={17} />
+            Configurações
+          </a>
+          <div className="secure-note">
+            <span>
+              <Check size={13} />
+            </span>
+            <p>
+              <strong>Seus dados estão seguros</strong>
+              <small>Sincronizado agora</small>
+            </p>
+          </div>
+        </div>
+      </aside>
+      <section className="content" id="dashboard">
+        <header className="topbar">
+          <button
+            className="icon-button menu-trigger"
+            type="button"
+            aria-label="Abrir menu"
+            onClick={() => setIsMenuOpen(true)}
+          >
+            <Menu size={21} />
+          </button>
+          <div className="crumbs">
+            <span>Casa Lima</span>
+            <ChevronRight size={14} />
+            <strong>Dashboard</strong>
+          </div>
+          <div className="top-actions">
+            <button className="period-button">
+              <CalendarDays size={16} />
+              Setembro 2026
+              <ChevronRight size={14} />
+            </button>
+            <button className="profile-button" aria-label="Abrir perfil">
+              LC
+            </button>
+          </div>
+        </header>
+        <div className="page-wrap">
+          <div className="page-heading">
+            <div>
+              <p className="eyebrow">TERÇA-FEIRA, 22 DE SETEMBRO</p>
+              <h1>Boa noite, Leandro.</h1>
+              <p className="heading-copy">
+                Aqui está o pulso financeiro da casa para o próximo pagamento.
+              </p>
+            </div>
+            <button className="primary-button">
+              <Plus size={17} />
+              Adicionar movimento
+            </button>
+          </div>
+          <section className="stats-grid" aria-label="Resumo financeiro">
+            <article className="stat-card accent-card">
+              <div className="stat-head">
+                <span>Próximo pagamento</span>
+                <span className="status-pill">Em 3 dias</span>
+              </div>
+              <strong>{currency.format(3250)}</strong>
+              <p>
+                25 de setembro <span>•</span> salário do casal
+              </p>
+              <div className="progress-track">
+                <span style={{ width: "58%" }} />
+              </div>
+              <small>58% já comprometido</small>
+            </article>
+            <article className="stat-card">
+              <div className="stat-head">
+                <span>Contas reservadas</span>
+                <ReceiptText size={18} />
+              </div>
+              <strong>{currency.format(totals.reserved)}</strong>
+              <p>de {currency.format(3250)} recebidos</p>
+              <div className="stat-footer">
+                <span className="mini-dot peach" />
+                {bills.length} contas previstas
+              </div>
+            </article>
+            <article className="stat-card">
+              <div className="stat-head">
+                <span>Saldo líquido</span>
+                <ArrowUpRight size={18} />
+              </div>
+              <strong className="positive">
+                {currency.format(totals.liquid)}
+              </strong>
+              <p>disponível após compromissos</p>
+              <div className="stat-footer">
+                <span className="mini-dot mint" />
+                +12,4% vs. pagamento anterior
+              </div>
+            </article>
+          </section>
+          <div className="content-grid">
+            <section className="panel payments-panel" id="payments">
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">FLUXO DE CAIXA</p>
+                  <h2>Próximos pagamentos</h2>
+                </div>
+                <button className="text-button">
+                  Ver calendário <ChevronRight size={15} />
+                </button>
+              </div>
+              <div className="payment-list">
+                {payments.map((payment) => (
+                  <div
+                    className={
+                      payment.status === "next"
+                        ? "payment-row next-payment"
+                        : "payment-row"
+                    }
+                    key={payment.date}
+                  >
+                    <div className="date-block">
+                      <strong>{payment.date.split(" ")[0]}</strong>
+                      <span>SET/OUT</span>
+                    </div>
+                    <div className="payment-info">
+                      <strong>{payment.label}</strong>
+                      <span>
+                        {payment.status === "next"
+                          ? "Salário do casal"
+                          : "Salários + recorrentes"}
+                      </span>
+                    </div>
+                    <strong className="payment-amount">
+                      {currency.format(payment.amount)}
+                    </strong>
+                    <ChevronRight size={17} />
+                  </div>
+                ))}
+              </div>
+              <button className="add-payment">
+                <Plus size={16} />
+                Planejar outro pagamento
+              </button>
+            </section>
+            <section className="panel goal-panel" id="goals">
+              <div className="goal-orbit">
+                <Sparkles size={20} />
+              </div>
+              <p className="eyebrow">OBJETIVO DO MÊS</p>
+              <h2>Reserva de emergência</h2>
+              <p className="goal-copy">
+                Cada pagamento deixa a casa um pouco mais tranquila.
+              </p>
+              <div className="goal-value">
+                <strong>{currency.format(780)}</strong>
+                <span>de {currency.format(2000)}</span>
+              </div>
+              <div className="goal-track">
+                <span style={{ width: "39%" }} />
+              </div>
+              <div className="goal-footer">
+                <span>39% concluído</span>
+                <ArrowUpRight size={16} />
+              </div>
+            </section>
+          </div>
+          <section className="panel bills-panel" id="bills">
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">25 DE SETEMBRO</p>
+                <h2>Contas deste pagamento</h2>
+              </div>
+              <button className="outline-button">
+                <Plus size={16} />
+                Nova conta
+              </button>
+            </div>
+            <div className="bill-table">
+              <div className="table-head">
+                <span>Conta</span>
+                <span>Responsável</span>
+                <span>Vencimento</span>
+                <span>Valor</span>
+                <span>Status</span>
+              </div>
+              {bills.map((bill) => (
+                <div className="bill-row" key={bill.id}>
+                  <div className="bill-name">
+                    <button
+                      className={
+                        bill.paid ? "check-control checked" : "check-control"
+                      }
+                      type="button"
+                      aria-label={
+                        bill.paid
+                          ? `Desmarcar ${bill.name}`
+                          : `Marcar ${bill.name} como paga`
+                      }
+                      onClick={() => toggleBill(bill.id)}
+                    >
+                      {bill.paid ? (
+                        <CircleCheck size={20} />
+                      ) : (
+                        <Circle size={20} />
+                      )}
+                    </button>
+                    <div>
+                      <strong>{bill.name}</strong>
+                      <small>{bill.category}</small>
+                    </div>
+                  </div>
+                  <span className="owner-label">{bill.owner}</span>
+                  <span className="due-label">{bill.due}</span>
+                  <strong
+                    className={bill.paid ? "bill-amount muted" : "bill-amount"}
+                  >
+                    {currency.format(bill.amount)}
+                  </strong>
+                  <span
+                    className={bill.paid ? "bill-status paid" : "bill-status"}
+                  >
+                    {bill.paid ? "Paga" : "Pendente"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+          <footer className="app-footer">
+            <span>FinanceVault</span>
+            <span>Seu dinheiro, no mesmo plano.</span>
+            <span>Última sincronização: agora</span>
+          </footer>
+        </div>
+      </section>
+    </main>
+  );
 }
 
-export default App
+export default App;
