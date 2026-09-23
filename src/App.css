@@ -20,7 +20,12 @@
 }
 .calendar-actions {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+.calendar-month-actions {
+  display: flex;
   gap: 8px;
 }
 .calendar-nav-button {
@@ -30,7 +35,16 @@
   place-items: center;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--paper);
+  background: var(--green);
+  color: #fff;
+  border-color: var(--green);
+}
+.calendar-nav-button:hover {
+  background: #14483d;
+}
+.calendar-nav-button:focus-visible {
+  outline: 2px solid #d1efb4;
+  outline-offset: 2px;
 }
 .calendar-legend {
   display: flex;
@@ -162,8 +176,11 @@
   .calendar-heading {
     display: block;
   }
-  .calendar-heading .outline-button {
+  .calendar-actions {
     margin-top: 20px;
+    align-items: stretch;
+  }
+  .calendar-actions .outline-button {
     width: 100%;
     justify-content: center;
   }
@@ -542,14 +559,14 @@
 .stats-grid {
   display: grid;
   grid-template-columns: 1.25fr 1fr 1fr;
-  gap: 14px;
-  margin-bottom: 17px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 .stat-card {
   background: var(--paper);
   border: 1px solid var(--line);
-  border-radius: 13px;
-  padding: 20px 21px 17px;
+  border-radius: 10px;
+  padding: 10px;
   min-height: 163px;
 }
 .accent-card {
@@ -577,7 +594,7 @@
 }
 .stat-card > strong {
   display: block;
-  margin: 20px 0 5px;
+  margin: 5px 0 5px;
   font:
     600 25px "Space Grotesk",
     sans-serif;
@@ -596,9 +613,9 @@
 .progress-track,
 .goal-track {
   background: rgba(255, 255, 255, 0.19);
-  height: 4px;
+  height: 5px;
   border-radius: 5px;
-  margin-top: 20px;
+  margin-top: 10px;
   overflow: hidden;
 }
 .progress-track span {
@@ -639,18 +656,18 @@
 .content-grid {
   display: grid;
   grid-template-columns: 1.55fr 1fr;
-  gap: 17px;
-  margin-bottom: 17px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 .panel {
   border: 1px solid var(--line);
   background: var(--paper);
-  border-radius: 13px;
+  border-radius: 10px;
 }
 .payments-panel,
 .goal-panel,
 .bills-panel {
-  padding: 23px;
+  padding: 10px;
 }
 .panel-heading {
   display: flex;
@@ -677,14 +694,14 @@
   padding: 4px 0;
 }
 .payment-list {
-  margin-top: 20px;
+  margin-top: 5px;
 }
 .payment-row {
   display: flex;
   align-items: center;
-  min-height: 66px;
+  min-height: 60px;
   border-top: 1px solid #edf0ec;
-  gap: 14px;
+  gap: 10px;
 }
 .payment-row:first-child {
   border: 0;
@@ -987,7 +1004,7 @@
   .payments-panel,
   .goal-panel,
   .bills-panel {
-    padding: 18px 15px;
+    padding: 10px 15px;
   }
   .table-head {
     display: none;

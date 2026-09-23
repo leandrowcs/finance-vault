@@ -326,24 +326,26 @@ function App({ user = null, onSignOut }: AppProps = {}) {
                 </p>
               </div>
               <div className="calendar-actions">
-                <button
-                  className="icon-button calendar-nav-button"
-                  type="button"
-                  aria-label="Mês anterior"
-                  title="Mês anterior"
-                  onClick={() => changeCalendarMonth(-1)}
-                >
-                  <ChevronLeft size={18} />
-                </button>
-                <button
-                  className="icon-button calendar-nav-button"
-                  type="button"
-                  aria-label="Próximo mês"
-                  title="Próximo mês"
-                  onClick={() => changeCalendarMonth(1)}
-                >
-                  <ChevronLeft size={18} />
-                </button>
+                <div className="calendar-month-actions">
+                  <button
+                    className="icon-button calendar-nav-button"
+                    type="button"
+                    aria-label="Mês anterior"
+                    title="Mês anterior"
+                    onClick={() => changeCalendarMonth(-1)}
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <button
+                    className="icon-button calendar-nav-button"
+                    type="button"
+                    aria-label="Próximo mês"
+                    title="Próximo mês"
+                    onClick={() => changeCalendarMonth(1)}
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </div>
                 <button
                   className="outline-button"
                   type="button"
