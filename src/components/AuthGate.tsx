@@ -10,7 +10,7 @@ const allowedEmails = (import.meta.env.VITE_ALLOWED_EMAILS ?? '')
   .filter(Boolean)
 
 function AccessMessage({ title, detail, action }: { title: string; detail: string; action?: ReactNode }) {
-  return <main className="access-screen"><div className="access-card"><div className="access-mark">FV</div><p className="eyebrow">FINANCEVAULT</p><h1>{title}</h1><p>{detail}</p>{action}</div></main>
+  return <main className="access-screen"><div className="access-card"><img className="access-logo" src="/icons/finance-vault-logo.svg" alt="FinanceVault" /><p className="eyebrow">FINANCEVAULT</p><h1>{title}</h1><p>{detail}</p>{action}</div></main>
 }
 
 export default function AuthGate() {

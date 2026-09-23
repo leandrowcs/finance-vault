@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Fundo escuro arredondado da marca. -->
+  <rect x="32" y="32" width="448" height="448" rx="112" fill="#18312f" />
+
+  <!-- Escudo de proteção que representa segurança financeira. -->
+  <path
+    d="M256 88
+       L382 136
+       V250
+       C382 334 329 397 256 432
+       C183 397 130 334 130 250
+       V136 Z"
+    fill="#d1efb4" />
+
+  <!-- Barra superior: maior comprimento, sugere crescimento e a parte superior do F. -->
+  <path d="M184 192 H328" fill="none" stroke="#18312f" stroke-width="30" stroke-linecap="round" />
+
+  <!-- Barra central: mantém o alinhamento e reforça a leitura visual do F. -->
+  <path d="M184 256 H280" fill="none" stroke="#18312f" stroke-width="30" stroke-linecap="round" />
+
+  <!-- Barra inferior: menor comprimento, fecha o conjunto de barras alinhadas. -->
+  <path d="M184 320 H232" fill="none" stroke="#18312f" stroke-width="30" stroke-linecap="round" />
+</svg>

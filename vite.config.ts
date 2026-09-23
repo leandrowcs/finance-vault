@@ -8,7 +8,6 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg'],
       manifest: {
         name: 'FinanceVault',
         short_name: 'FinanceVault',
@@ -18,8 +17,8 @@ export default defineConfig({
         theme_color: '#18312f',
         background_color: '#f6f5f0',
         icons: [
-          { src: '/icons/icon-192.svg', sizes: '192x192', type: 'image/svg+xml' },
-          { src: '/icons/icon-512.svg', sizes: '512x512', type: 'image/svg+xml' },
+          { src: '/icons/finance-vault-logo-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icons/finance-vault-logo-512.png', sizes: '512x512', type: 'image/png' },
         ],
       },
       workbox: {
