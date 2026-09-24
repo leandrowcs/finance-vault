@@ -31,6 +31,15 @@ function movementsStorageKey(user: User | null) {
   return user ? `financevault:movements:${user.uid}` : "financevault:movements";
 }
 
+function readStoredMovements(user: User | null) {
+  try {
+    const stored = localStorage.getItem(movementsStorageKey(user));
+    return stored ? JSON.parse(stored) as Movement[] : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function App({ user = null, onSignOut }: AppProps = {}) {
   const [billPaidState, setBillPaidState] = useState<Record<string, boolean>>(() => Object.fromEntries(financePeriods.flatMap((period) => period.bills.map((bill) => [periodBillKey(period.date, bill.id), bill.paid]))));
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -45,31 +54,29 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const [movementsLoaded, setMovementsLoaded] = useState(false);
   useEffect(() => {
     setMovementsLoaded(false);
+    const storedMovements = readStoredMovements(user);
+    setMovements(storedMovements);
     if (user && db) {
       return onSnapshot(collection(db, "users", user.uid, "movements"), (snapshot) => {
-        setMovements(snapshot.docs.map((item) => item.data() as Movement));
+        const remoteMovements = snapshot.docs.map((item) => item.data() as Movement);
+        const movementsById = new Map(storedMovements.map((movement) => [movement.id, movement]));
+        remoteMovements.forEach((movement) => movementsById.set(movement.id, movement));
+        setMovements([...movementsById.values()]);
         setMovementsLoaded(true);
       }, () => setMovementsLoaded(true));
-    }
-    try {
-      const stored = localStorage.getItem(movementsStorageKey(user));
-      setMovements(stored ? JSON.parse(stored) as Movement[] : []);
-    } catch {
-      setMovements([]);
     }
     setMovementsLoaded(true);
   }, [user]);
   const saveMovement = async (movement: Movement) => {
-    setMovements((current) => [...current.filter((item) => item.id !== movement.id), movement]);
+    const nextMovements = [...movements.filter((item) => item.id !== movement.id), movement];
+    setMovements(nextMovements);
+    localStorage.setItem(movementsStorageKey(user), JSON.stringify(nextMovements));
     if (user && db) {
       try {
         await setDoc(doc(db, "users", user.uid, "movements", movement.id), movement);
-      } catch {
-        localStorage.setItem(movementsStorageKey(user), JSON.stringify([...movements.filter((item) => item.id !== movement.id), movement]));
-      }
+      } catch { return; }
       return;
     }
-    localStorage.setItem(movementsStorageKey(user), JSON.stringify([...movements.filter((item) => item.id !== movement.id), movement]));
   };
   const calendarItems = useMemo(() => {
     const items = new Map<string, CalendarItem[]>();
