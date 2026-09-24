@@ -1524,8 +1524,8 @@
 @media (max-width: 640px) {
   .section-heading { align-items: flex-start; }
   .section-heading h2 { font-size: 19px; }
-  .year-summary-grid,
-  .year-people-summary { grid-template-columns: 1fr; }
+  .year-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .year-people-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .year-summary-card { min-height: 108px; }
   .year-people-summary p { min-width: 0; }
   .month-quick-summary {
