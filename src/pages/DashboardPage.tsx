@@ -74,9 +74,8 @@ function MonthDetailsModal({ month, onClose, onToggleBill, onEdit }: { month: Mo
   return <div className="movement-modal-layer">
     <button className="profile-modal-backdrop" type="button" aria-label="Fechar detalhes do mês" onClick={onClose} />
     <section className="movement-modal month-details-modal" role="dialog" aria-modal="true" aria-labelledby="month-details-title">
-      <button className="icon-button profile-modal-close" type="button" aria-label="Fechar detalhes do mês" onClick={onClose}><X size={18} /></button>
-      <p className="eyebrow">DETALHES COMPLETOS</p>
-      <h2 id="month-details-title">{month.label}</h2>
+      <header className="month-details-modal-header"><button className="icon-button profile-modal-close" type="button" aria-label="Fechar detalhes do mês" onClick={onClose}><X size={18} /></button><p className="eyebrow">DETALHES COMPLETOS</p><h2 id="month-details-title">{month.label}</h2></header>
+      <div className="month-details-modal-content">
       <section className="month-section" aria-labelledby="income-title">
         <div className="section-heading"><div><p className="eyebrow">{month.label.toUpperCase()}</p><h2 id="income-title">Receitas do mês</h2></div><span className="section-caption">{month.incomeEntriesByPerson.Leandro.length + month.incomeEntriesByPerson.Ketlin.length} registros</span></div>
         <article className="month-total-card income-total-card"><div><span>Total acumulado</span><strong>{currency.format(month.incomeTotal)}</strong><small>Leandro + Ketlin</small></div><div className="total-icon"><ArrowUpRight size={21} /></div></article>
@@ -87,6 +86,7 @@ function MonthDetailsModal({ month, onClose, onToggleBill, onEdit }: { month: Mo
         <div className="expense-summary-grid"><article className="month-total-card expense-total-card"><div><span>Total das despesas</span><strong>{currency.format(month.expenseTotal)}</strong><small>{month.billsByPerson.reduce((total, group) => total + group.bills.length, 0)} contas no mês</small></div><ReceiptText size={21} /></article>{month.relatedExpenseCards.map((card) => <article className="related-income-card" key={card.id}><span>{card.isMovement ? "Despesa registrada" : "Despesas da receita"}</span><strong>{currency.format(card.amount)}</strong><small><CalendarDays size={13} />{card.label}</small></article>)}</div>
         {!hasExpenses ? <div className="empty-state wide">Nenhuma despesa neste mês.</div> : <div className="person-grid expense-columns">{month.billsByPerson.map(({ person, bills }) => <section className="person-column expense-column" key={person}><div className="column-heading"><div className={`person-avatar ${person.toLowerCase()}`}>{person[0]}</div><div><h3>Despesas de {person}</h3><span>{currency.format(month.expenseByPerson[person])} atribuídos</span></div></div>{bills.map(({ bill, incomeLabel, expenseDate, toggleKey, editKey }) => <article className="expense-card" key={`${person}-${toggleKey}`}><div className="expense-card-main"><div className="expense-category"><ReceiptText size={15} /><div><strong>{bill.name}</strong><span>{bill.category}{bill.owner === "Compartilhado" && " · Compartilhada"}</span></div></div><strong className={bill.paid ? "expense-amount paid-amount" : "expense-amount"}>{currency.format(allocatedAmount(bill.amount, bill.owner))}</strong></div><div className="expense-card-meta"><span><CalendarDays size={13} />Vence em {dateFormatter.format(expenseDate)}</span><span><ArrowUpRight size={13} />Receita: {incomeLabel}</span><button className="entry-edit-button" type="button" aria-label={`Editar despesa ${bill.name}`} onClick={() => onEdit({ id: editKey, type: "expense", amount: bill.amount, date: `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, "0")}-${String(expenseDate.getDate()).padStart(2, "0")}`, description: bill.name, category: bill.category, owner: bill.owner })}><Pencil size={14} /></button><button className={bill.paid ? "check-control checked" : "check-control"} type="button" aria-label={bill.paid ? `Desmarcar ${bill.name}` : `Marcar ${bill.name} como paga`} onClick={() => onToggleBill(toggleKey)}>{bill.paid ? <CircleCheck size={18} /> : <Circle size={18} />}</button></div></article>)}</section>)}</div>}
       </section>
+      </div>
     </section>
   </div>;
 }
@@ -161,7 +161,7 @@ export function DashboardPage({ movements, greeting, openedDateLabel, daysUntilN
           };
         });
 
-        return { person, bills: [...seeded, ...added] };
+        return { person, bills: [...seeded, ...added].sort((left, right) => left.expenseDate.getTime() - right.expenseDate.getTime()) };
       });
 
       const expenseByPerson = billsByPerson.reduce<Record<Person, number>>((totals, group) => {
