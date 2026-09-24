@@ -17,8 +17,8 @@ export default defineConfig({
         theme_color: '#18312f',
         background_color: '#f6f5f0',
         icons: [
-          { src: '/icons/finance-vault-logo-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icons/finance-vault-logo-512.png', sizes: '512x512', type: 'image/png' },
+          { src: '/icons/finance-vault-logo-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+          { src: '/icons/finance-vault-logo-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
         ],
       },
       workbox: {
