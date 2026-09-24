@@ -1,18 +1,18 @@
 import { useMemo, useState } from "react";
 import type { User } from "firebase/auth";
-import { activePeriod, financePeriods, totalIncome } from "./data/financeSeed";
+import { financePeriods, totalIncome } from "./data/financeSeed";
 import { AppNavigation } from "./components/AppNavigation";
 import { AppTopbar } from "./components/AppTopbar";
 import { ProfileModal } from "./components/ProfileModal";
 import { CalendarPage } from "./pages/CalendarPage";
 import { DashboardPage } from "./pages/DashboardPage";
-import { dateKey, dueDate, nextPaymentPeriod } from "./lib/finance";
+import { currentMonthPeriods, dateKey, dueDate, nextPaymentPeriod } from "./lib/finance";
 import type { Bill, CalendarItem } from "./types/finance";
 import "./App.css";
 
 type AppProps = { user?: User | null; onSignOut?: () => Promise<void> };
 
-const initialBills: Bill[] = activePeriod.bills;
+const initialBills: Bill[] = currentMonthPeriods().flatMap((period) => period.bills);
 const openedAt = new Date();
 const greeting = openedAt.getHours() < 12 ? "Bom dia" : openedAt.getHours() < 18 ? "Boa tarde" : "Boa noite";
 const openedDateLabel = new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "numeric", month: "long" }).format(openedAt);
@@ -43,5 +43,5 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const toggleBill = (id: string) => setBills((current) => current.map((bill) => bill.id === id ? { ...bill, paid: !bill.paid } : bill));
   const handleSignOut = async () => { if (!onSignOut) return; setIsSigningOut(true); setSignOutError(""); try { await onSignOut(); } catch { setSignOutError("Não foi possível sair agora."); setIsSigningOut(false); } };
 
-  return <main className="app-shell"><AppNavigation isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} /><section className="content"><AppTopbar user={user} calendarMonth={calendarMonth} initials={initials} onMenuOpen={() => setIsMenuOpen(true)} onCalendarOpen={() => setIsCalendarOpen(true)} onProfileOpen={() => setIsProfileOpen(true)} />{isCalendarOpen ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} onClose={() => setIsCalendarOpen(false)} /> : <DashboardPage bills={bills} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} periodIncome={totalIncome(nextPaymentPeriod)} onToggleBill={toggleBill} onOpenCalendar={() => setIsCalendarOpen(true)} />}{isProfileOpen && <ProfileModal user={user} displayName={displayName} initials={initials} signOutError={signOutError} isSigningOut={isSigningOut} onClose={() => setIsProfileOpen(false)} onSignOut={onSignOut ? () => void handleSignOut() : undefined} />}</section></main>;
+  return <main className="app-shell"><AppNavigation isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} /><section className="content"><AppTopbar user={user} calendarMonth={calendarMonth} initials={initials} onMenuOpen={() => setIsMenuOpen(true)} onCalendarOpen={() => setIsCalendarOpen(true)} onProfileOpen={() => setIsProfileOpen(true)} />{isCalendarOpen ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} onClose={() => setIsCalendarOpen(false)} /> : <DashboardPage bills={bills} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} onOpenCalendar={() => setIsCalendarOpen(true)} />}{isProfileOpen && <ProfileModal user={user} displayName={displayName} initials={initials} signOutError={signOutError} isSigningOut={isSigningOut} onClose={() => setIsProfileOpen(false)} onSignOut={onSignOut ? () => void handleSignOut() : undefined} />}</section></main>;
 }

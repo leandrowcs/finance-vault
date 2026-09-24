@@ -1,24 +1,49 @@
-import { ArrowUpRight, ArrowUpRight as IncomeIcon, ChevronRight, Circle, CircleCheck, Plus, ReceiptText, Sparkles } from "lucide-react";
-import { activePeriod, totalIncome } from "../data/financeSeed";
-import { currency, payments, reservedAmount } from "../lib/finance";
+import { ArrowUpRight, CalendarDays, ChevronRight, Circle, CircleCheck, Plus, ReceiptText, Users } from "lucide-react";
+import { currency, currentMonthPeriods, dueDate, monthLabels } from "../lib/finance";
 import type { Bill } from "../types/finance";
 
-type DashboardPageProps = { bills: Bill[]; greeting: string; openedDateLabel: string; daysUntilNextPayment: number; periodIncome: number; onToggleBill: (id: string) => void; onOpenCalendar: () => void };
+type DashboardPageProps = { bills: Bill[]; greeting: string; openedDateLabel: string; daysUntilNextPayment: number; onToggleBill: (id: string) => void; onOpenCalendar: () => void };
+type Person = "Leandro" | "Ketlin";
 
-export function DashboardPage({ bills, greeting, openedDateLabel, daysUntilNextPayment, periodIncome, onToggleBill, onOpenCalendar }: DashboardPageProps) {
-  const reserved = bills.reduce((total, bill) => total + reservedAmount(bill), 0);
-  const liquid = totalIncome(activePeriod) - reserved;
-  const commitmentPercent = Math.round((reserved / periodIncome) * 100);
+const dateFormatter = new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "short" });
+const people: Person[] = ["Leandro", "Ketlin"];
+
+function expenseBelongsTo(bill: Bill, person: Person) {
+  return bill.owner === "Compartilhado" || (person === "Leandro" ? bill.owner === "Você" : bill.owner === "Esposa");
+}
+
+function personAmount(bill: Bill) {
+  return bill.owner === "Compartilhado" ? bill.amount / 2 : bill.amount;
+}
+
+function monthLabel(date: Date) {
+  return `${monthLabels[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+export function DashboardPage({ bills, greeting, openedDateLabel, daysUntilNextPayment, onToggleBill, onOpenCalendar }: DashboardPageProps) {
+  const periods = currentMonthPeriods();
+  const monthDate = periods[0] ? new Date(`${periods[0].date}T12:00:00`) : new Date();
+  const monthBills = periods.flatMap((period) => period.bills.map((bill) => bills.find((currentBill) => currentBill.id === bill.id) ?? bill));
+  const incomeTotal = periods.reduce((total, period) => total + period.income.leandro + period.income.ketlin, 0);
+  const expenseTotal = monthBills.reduce((total, bill) => total + bill.amount, 0);
+  const incomeByPerson: Record<Person, number> = {
+    Leandro: periods.reduce((total, period) => total + period.income.leandro, 0),
+    Ketlin: periods.reduce((total, period) => total + period.income.ketlin, 0),
+  };
+  const billsByPerson = people.map((person) => ({
+    person,
+    bills: periods.flatMap((period) => period.bills.filter((bill) => expenseBelongsTo(bill, person)).map((bill) => ({ bill: bills.find((currentBill) => currentBill.id === bill.id) ?? bill, incomeLabel: period.label }))),
+  }));
+  const personTotals = billsByPerson.reduce<Record<Person, number>>((totals, group) => {
+    totals[group.person] = group.bills.reduce((total, item) => total + personAmount(item.bill), 0);
+    return totals;
+  }, { Leandro: 0, Ketlin: 0 });
+
   return <div className="page-wrap" id="dashboard">
-    <div className="page-heading"><div><p className="eyebrow">{openedDateLabel.toUpperCase()}</p><h1>{greeting}, Leandro.</h1><p className="heading-copy">Aqui está o pulso financeiro das suas contas para o próximo pagamento.</p></div><button className="primary-button"><Plus size={17} />Adicionar movimento</button></div>
-    <section className="stats-grid" aria-label="Resumo financeiro">
-      <article className="stat-card accent-card"><div className="stat-head"><span>Próximo pagamento</span><span className="status-pill">{daysUntilNextPayment === 0 ? "Hoje" : `Em ${daysUntilNextPayment} dias`}</span></div><strong>{currency.format(periodIncome)}</strong><p>{activePeriod.label} <span>•</span> receita do período</p><div className="progress-track"><span style={{ width: `${commitmentPercent}%` }} /></div><small>{commitmentPercent}% já comprometido</small></article>
-      <article className="stat-card"><div className="stat-head"><span>Contas reservadas</span><ReceiptText size={18} /></div><strong>{currency.format(reserved)}</strong><p>de {currency.format(periodIncome)} recebidos</p><div className="stat-footer"><span className="mini-dot peach" />{bills.length} contas previstas</div></article>
-      <article className="stat-card"><div className="stat-head"><span>Saldo líquido</span><ArrowUpRight size={18} /></div><strong className="positive">{currency.format(liquid)}</strong><p>disponível após compromissos</p><div className="stat-footer"><span className="mini-dot mint" />+12,4% vs. pagamento anterior</div></article>
-    </section>
-    <div className="content-grid"><section className="panel payments-panel" id="payments"><div className="panel-heading"><div><p className="eyebrow">FLUXO DE CAIXA</p><h2>Próximos pagamentos</h2></div><button className="text-button" onClick={onOpenCalendar}>Ver calendário <ChevronRight size={15} /></button></div><div className="payment-list">{payments.map((payment) => <div className={payment.status === "next" ? "payment-row next-payment" : "payment-row"} key={payment.date}><div className="date-block"><strong>{payment.date.split(" ")[0]}</strong><span>SET/OUT</span></div><div className="payment-info"><strong>{payment.label}</strong><span>{payment.status === "next" ? "Receita do período" : "Salários + recorrentes"}</span></div><strong className="payment-amount">{currency.format(payment.amount)}</strong><ChevronRight size={17} /></div>)}</div><button className="add-payment"><Plus size={16} />Planejar outro pagamento</button></section>
-      <section className="panel goal-panel" id="goals"><div className="goal-orbit"><Sparkles size={20} /></div><p className="eyebrow">OBJETIVO DO MÊS</p><h2>Reserva de emergência</h2><p className="goal-copy">Cada pagamento deixa suas contas um pouco mais tranquilas.</p><div className="goal-value"><strong>{currency.format(780)}</strong><span>de {currency.format(2000)}</span></div><div className="goal-track"><span style={{ width: "39%" }} /></div><div className="goal-footer"><span>39% concluído</span><IncomeIcon size={16} /></div></section></div>
-    <section className="panel bills-panel" id="bills"><div className="panel-heading"><div><p className="eyebrow">{activePeriod.label.toUpperCase()}</p><h2>Contas deste pagamento</h2></div><button className="outline-button"><Plus size={16} />Nova conta</button></div><div className="bill-table"><div className="table-head"><span>Conta</span><span>Responsável</span><span>Vencimento</span><span>Valor</span><span>Status</span></div>{bills.map((bill) => <div className="bill-row" key={bill.id}><div className="bill-name"><button className={bill.paid ? "check-control checked" : "check-control"} type="button" aria-label={bill.paid ? `Desmarcar ${bill.name}` : `Marcar ${bill.name} como paga`} onClick={() => onToggleBill(bill.id)}>{bill.paid ? <CircleCheck size={20} /> : <Circle size={20} />}</button><div><strong>{bill.name}</strong><small>{bill.category}</small></div></div><span className="owner-label">{bill.owner}</span><span className="due-label">{bill.due}</span><strong className={bill.paid ? "bill-amount muted" : "bill-amount"}>{currency.format(bill.amount)}</strong><span className={bill.paid ? "bill-status paid" : "bill-status"}>{bill.paid ? "Paga" : "Pendente"}</span></div>)}</div></section>
+    <div className="page-heading"><div><p className="eyebrow">{openedDateLabel.toUpperCase()}</p><h1>{greeting}, Leandro.</h1><p className="heading-copy">Visão completa das receitas e despesas de {monthLabel(monthDate)}.</p></div><button className="primary-button"><Plus size={17} />Adicionar movimento</button></div>
+    <section className="month-section" aria-labelledby="income-title"><div className="section-heading"><div><p className="eyebrow">{monthLabel(monthDate).toUpperCase()}</p><h2 id="income-title">Receitas do mês</h2></div><span className="section-caption">{periods.length} {periods.length === 1 ? "receita registrada" : "receitas registradas"}</span></div><article className="month-total-card income-total-card"><div><span>Total acumulado</span><strong>{currency.format(incomeTotal)}</strong><small>Leandro + Ketlin</small></div><div className="total-icon"><ArrowUpRight size={21} /></div></article><div className="person-grid">{people.map((person) => <section className="person-column" key={person}><div className="column-heading"><div className={`person-avatar ${person.toLowerCase()}`}>{person[0]}</div><div><h3>{person}</h3><span>{currency.format(incomeByPerson[person])} no mês</span></div></div>{periods.length === 0 ? <div className="empty-state">Nenhuma receita neste mês.</div> : periods.map((period) => <article className="income-card" key={`${person}-${period.date}`}><div><strong>{currency.format(person === "Leandro" ? period.income.leandro : period.income.ketlin)}</strong><span>Receita recebida</span></div><time dateTime={period.date}><CalendarDays size={14} />{period.label}</time></article>)}</section>)}</div></section>
+    <section className="month-section expenses-section" aria-labelledby="expenses-title"><div className="section-heading"><div><p className="eyebrow">COMPROMISSOS FINANCEIROS</p><h2 id="expenses-title">Despesas do mês</h2></div><button className="text-button" onClick={onOpenCalendar}>Ver calendário <ChevronRight size={15} /></button></div><div className="expense-summary-grid"><article className="month-total-card expense-total-card"><div><span>Total das despesas</span><strong>{currency.format(expenseTotal)}</strong><small>{monthBills.length} contas no mês</small></div><ReceiptText size={21} /></article>{periods.map((period) => { const total = period.bills.reduce((sum, bill) => sum + bill.amount, 0); return <article className="related-income-card" key={period.date}><span>Despesas da receita</span><strong>{currency.format(total)}</strong><small><CalendarDays size={13} />{period.label}</small></article>; })}</div>{periods.length === 0 ? <div className="empty-state wide">Nenhuma despesa neste mês.</div> : <div className="person-grid expense-columns">{billsByPerson.map(({ person, bills: personBills }) => <section className="person-column expense-column" key={person}><div className="column-heading"><div className={`person-avatar ${person.toLowerCase()}`}>{person[0]}</div><div><h3>Despesas de {person}</h3><span>{currency.format(personTotals[person])} atribuídos</span></div></div>{personBills.map(({ bill, incomeLabel }) => <article className="expense-card" key={`${person}-${bill.id}`}><div className="expense-card-main"><div className="expense-category"><ReceiptText size={15} /><div><strong>{bill.name}</strong><span>{bill.category}{bill.owner === "Compartilhado" && " · Compartilhada"}</span></div></div><strong className={bill.paid ? "expense-amount paid-amount" : "expense-amount"}>{currency.format(personAmount(bill))}</strong></div><div className="expense-card-meta"><span><CalendarDays size={13} />Vence em {dateFormatter.format(dueDate(periods.find((period) => period.bills.some((periodBill) => periodBill.id === bill.id))?.date ?? periods[0].date, bill.due))}</span><span><ArrowUpRight size={13} />Receita: {incomeLabel}</span><button className={bill.paid ? "check-control checked" : "check-control"} type="button" aria-label={bill.paid ? `Desmarcar ${bill.name}` : `Marcar ${bill.name} como paga`} onClick={() => onToggleBill(bill.id)}>{bill.paid ? <CircleCheck size={18} /> : <Circle size={18} />}</button></div></article>)}</section>)}</div>}</section>
+    <section className="dashboard-footer-card"><Users size={17} /><span>Despesas compartilhadas aparecem nas duas colunas e são divididas igualmente entre Leandro e Ketlin.</span><span className="next-payment-note">Próximo pagamento: {daysUntilNextPayment === 0 ? "hoje" : `em ${daysUntilNextPayment} dias`}</span></section>
     <footer className="app-footer"><span>FinanceVault</span><span>Seu dinheiro, no mesmo plano.</span><span>Última sincronização: agora</span></footer>
   </div>;
 }

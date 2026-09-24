@@ -15,5 +15,10 @@ export const dueDate = (periodDate: string, due: string) => {
 
 export const reservedAmount = (bill: Bill) => bill.owner === "Compartilhado" ? bill.amount / 2 : bill.amount;
 
+export const currentMonthPeriods = (date = new Date()) => financePeriods.filter((period) => {
+  const periodDate = new Date(`${period.date}T12:00:00`);
+  return periodDate.getFullYear() === date.getFullYear() && periodDate.getMonth() === date.getMonth();
+});
+
 export const nextPaymentPeriod = financePeriods.find((period) => new Date(`${period.date}T12:00:00`) >= new Date()) ?? activePeriod;
 export const payments = financePeriods.map((period, index) => ({ date: period.label, label: index === 0 ? "Pagamento recebido" : "Próximo pagamento", amount: totalIncome(period), status: index === 0 ? "upcoming" : "next" }));
