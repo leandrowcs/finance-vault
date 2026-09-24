@@ -1170,6 +1170,66 @@
 .month-section {
   margin-bottom: 34px;
 }
+.year-summary-section {
+  margin-bottom: 38px;
+}
+.year-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.year-summary-card {
+  min-height: 128px;
+  padding: 19px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.year-summary-card span,
+.year-summary-card small {
+  display: block;
+  font-size: 10px;
+}
+.year-summary-card span { color: var(--muted); }
+.year-summary-card strong {
+  display: block;
+  margin: 15px 0 5px;
+  color: var(--ink);
+  font: 600 25px "Space Grotesk", sans-serif;
+}
+.year-summary-card small { color: var(--muted); }
+.year-summary-card.income { background: #e7f2e6; border-color: #d3e5d2; }
+.year-summary-card.expense { background: #f8e6d8; border-color: #efd4c0; }
+.year-summary-card.balance { background: var(--paper); }
+.year-people-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.year-people-summary article {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 15px 17px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.year-people-summary h3 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font: 600 14px "Space Grotesk", sans-serif;
+}
+.year-people-summary p {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  min-width: 210px;
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.year-people-summary p strong { color: var(--ink); }
 .month-accordion-list {
   display: grid;
   gap: 10px;
@@ -1281,8 +1341,8 @@
   display: flex;
   align-items: end;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 .section-heading h2 {
   margin: 0;
@@ -1464,6 +1524,10 @@
 @media (max-width: 640px) {
   .section-heading { align-items: flex-start; }
   .section-heading h2 { font-size: 19px; }
+  .year-summary-grid,
+  .year-people-summary { grid-template-columns: 1fr; }
+  .year-summary-card { min-height: 108px; }
+  .year-people-summary p { min-width: 0; }
   .month-quick-summary {
     grid-template-columns: 1fr;
   }

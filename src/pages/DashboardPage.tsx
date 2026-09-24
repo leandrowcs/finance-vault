@@ -175,9 +175,39 @@ export function DashboardPage({ movements, greeting, openedDateLabel, daysUntilN
   }, [currentYear, movements, isBillPaid]);
 
   const selectedMonth = months.find((month) => month.key === selectedMonthKey) ?? null;
+  const yearSummary = useMemo(() => {
+    const incomeByPerson: Record<Person, number> = {
+      Leandro: months.reduce((total, month) => total + month.incomeByPerson.Leandro, 0),
+      Ketlin: months.reduce((total, month) => total + month.incomeByPerson.Ketlin, 0),
+    };
+    const expenseByPerson: Record<Person, number> = {
+      Leandro: months.reduce((total, month) => total + month.expenseByPerson.Leandro, 0),
+      Ketlin: months.reduce((total, month) => total + month.expenseByPerson.Ketlin, 0),
+    };
+    const incomeTotal = incomeByPerson.Leandro + incomeByPerson.Ketlin;
+    const expenseTotal = expenseByPerson.Leandro + expenseByPerson.Ketlin;
+
+    return {
+      incomeTotal,
+      expenseTotal,
+      balance: incomeTotal - expenseTotal,
+      incomeByPerson,
+      expenseByPerson,
+      activeMonths: months.filter((month) => month.incomeTotal > 0 || month.expenseTotal > 0).length,
+    };
+  }, [months]);
 
   return <div className="page-wrap" id="dashboard">
     <div className="page-heading"><div><p className="eyebrow">{openedDateLabel.toUpperCase()}</p><h1>{greeting}, Leandro.</h1><p className="heading-copy">Visão geral de receitas e despesas de {currentYear}.</p></div></div>
+    <section className="year-summary-section" aria-labelledby="year-summary-title">
+      <div className="section-heading"><div><p className="eyebrow">RESUMO DO ANO</p><h2 id="year-summary-title">Balanço anual de {currentYear}</h2></div><span className="section-caption">{yearSummary.activeMonths} meses com movimentação</span></div>
+      <div className="year-summary-grid">
+        <article className="year-summary-card income"><span>Receitas no ano</span><strong>{currency.format(yearSummary.incomeTotal)}</strong><small>Leandro + Ketlin</small></article>
+        <article className="year-summary-card expense"><span>Despesas no ano</span><strong>{currency.format(yearSummary.expenseTotal)}</strong><small>Contas e lançamentos</small></article>
+        <article className="year-summary-card balance"><span>Saldo acumulado</span><strong className={yearSummary.balance >= 0 ? "positive" : "negative"}>{currency.format(yearSummary.balance)}</strong><small>Receitas menos despesas</small></article>
+      </div>
+      <div className="year-people-summary">{people.map((person) => <article key={person}><div className={`person-avatar ${person.toLowerCase()}`}>{person[0]}</div><div><h3>{person}</h3><p><span>Receitas</span><strong>{currency.format(yearSummary.incomeByPerson[person])}</strong></p><p><span>Despesas</span><strong>{currency.format(yearSummary.expenseByPerson[person])}</strong></p></div></article>)}</div>
+    </section>
     <section className="month-section" aria-labelledby="year-overview-title">
       <div className="section-heading"><div><p className="eyebrow">ANO VIGENTE</p><h2 id="year-overview-title">Balanço mensal</h2></div><button className="text-button" onClick={onOpenCalendar}>Ver calendário <ChevronRight size={15} /></button></div>
       <div className="month-accordion-list">{months.map((month) => {
