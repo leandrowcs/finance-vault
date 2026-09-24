@@ -6,7 +6,8 @@ type MovementModalProps = { onClose: () => void; onSubmit: (movement: Movement) 
 
 type FormState = Omit<Movement, "id">;
 
-const today = new Date().toISOString().slice(0, 10);
+const todayDate = new Date();
+const today = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`;
 const expenseCategories = ["Casa", "Transporte", "Alimentação", "Assinaturas", "Família", "Pets", "Outros"];
 const incomeCategories = ["Salário", "Freelance", "Investimentos", "Reembolso", "Outros"];
 const initialForm: FormState = { amount: 0, date: today, type: "expense", description: "", category: expenseCategories[0], owner: "Você" };
