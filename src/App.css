@@ -1170,6 +1170,113 @@
 .month-section {
   margin-bottom: 34px;
 }
+.month-accordion-list {
+  display: grid;
+  gap: 10px;
+}
+.month-accordion-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  overflow: hidden;
+}
+.month-accordion-trigger {
+  width: 100%;
+  padding: 16px 18px;
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+}
+.month-accordion-trigger strong,
+.month-accordion-trigger small {
+  display: block;
+}
+.month-accordion-trigger strong {
+  font: 600 16px "Space Grotesk", sans-serif;
+}
+.month-accordion-trigger small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.month-accordion-values {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.month-accordion-values span {
+  font: 600 13px "Space Grotesk", sans-serif;
+}
+.month-accordion-content {
+  padding: 0 18px 18px;
+  border-top: 1px solid #edf0ec;
+}
+.month-quick-summary {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.month-quick-summary article {
+  padding: 12px;
+  border: 1px solid #e3e8e2;
+  border-radius: 10px;
+  background: #fbfcf9;
+}
+.month-quick-summary span {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+}
+.month-quick-summary strong {
+  margin-top: 6px;
+  display: block;
+  color: var(--ink);
+  font: 600 18px "Space Grotesk", sans-serif;
+}
+.month-person-summary {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.month-person-summary article {
+  padding: 12px;
+  border: 1px solid #e3e8e2;
+  border-radius: 10px;
+  background: #fff;
+}
+.month-person-summary h3 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font: 600 14px "Space Grotesk", sans-serif;
+}
+.month-person-summary p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.month-person-summary p + p {
+  margin-top: 4px;
+}
+.month-person-summary strong {
+  color: var(--ink);
+}
+.month-details-button {
+  margin-top: 12px;
+}
+.positive {
+  color: #397153;
+}
+.negative {
+  color: #b94f4a;
+}
 .section-heading {
   display: flex;
   align-items: end;
@@ -1347,9 +1454,22 @@
 .empty-state.wide { padding: 20px; border: 1px dashed var(--line); border-radius: 10px; }
 .dashboard-footer-card { display: flex; align-items: center; gap: 8px; margin: 0 0 28px; padding: 13px 15px; border: 1px solid #dce8df; border-radius: 10px; color: #6f8778; background: #f3f8f1; font-size: 10px; }
 .next-payment-note { margin-left: auto; color: #849a8b; white-space: nowrap; }
+.month-details-modal {
+  width: min(100%, 1000px);
+  max-height: min(860px, calc(100vh - 40px));
+}
+.month-details-modal .month-total-card strong {
+  font-size: 24px;
+}
 @media (max-width: 640px) {
   .section-heading { align-items: flex-start; }
   .section-heading h2 { font-size: 19px; }
+  .month-quick-summary {
+    grid-template-columns: 1fr;
+  }
+  .month-person-summary {
+    grid-template-columns: 1fr;
+  }
   .person-grid,
   .expense-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .month-total-card { min-height: 102px; }
