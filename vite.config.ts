@@ -9,9 +9,9 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: 'FinanceVault',
-        short_name: 'FinanceVault',
-        description: 'Planejamento financeiro da sua casa.',
+        name: 'Finance Vault',
+        short_name: 'Finance Vault',
+        description: 'Planejamento financeiro das suas contas.',
         start_url: '/',
         display: 'standalone',
         theme_color: '#18312f',
