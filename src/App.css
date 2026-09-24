@@ -224,7 +224,7 @@
   overflow-y: auto;
   padding: 28px;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 10px 0 0 10px;
   background: var(--paper);
   box-shadow: 0 24px 70px rgba(24, 49, 47, .2);
 }
@@ -245,7 +245,7 @@
 .movement-submit { width: 100%; justify-content: center; margin-top: 3px; }
 @media (max-width: 640px) {
   .floating-action-button { right: 16px; bottom: 16px; }
-  .movement-modal { padding: 24px 18px; }
+  .movement-modal { padding: 10px; }
   .movement-fields-row { grid-template-columns: 1fr; }
 }
 :root {
@@ -487,6 +487,10 @@
 .profile-button {
   width: 32px;
   height: 32px;
+  flex: 0 0 32px;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
   border-radius: 50%;
   background: var(--peach);
   color: var(--ink);
@@ -1467,6 +1471,18 @@
 }
 .income-card span { margin-top: 3px; }
 .income-card time { gap: 5px; white-space: nowrap; }
+.entry-edit-button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+}
+.entry-edit-button:hover { color: var(--green); border-color: #9dc3a6; background: #eef6eb; }
 .expenses-section { margin-top: 42px; }
 .expense-summary-grid {
   display: grid;

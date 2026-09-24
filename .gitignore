@@ -24,4 +24,4 @@ dist-ssr
 *.sw?
 
 # Local finance workbook
-/docs/modelo_finance.xlsx
+/docs/*.xlsx

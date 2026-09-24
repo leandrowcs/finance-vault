@@ -33,5 +33,9 @@ service cloud.firestore {
           && collection in ['incomeSources', 'bills', 'payPeriods', 'billOccurrences', 'goals'];
       }
     }
+
+    match /users/{userId}/movements/{movementId} {
+      allow read, write: if signedIn() && request.auth.uid == userId;
+    }
   }
 }
