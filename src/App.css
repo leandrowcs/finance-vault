@@ -1495,6 +1495,18 @@
   background: transparent;
 }
 .entry-edit-button:hover { color: var(--green); border-color: #9dc3a6; background: #eef6eb; }
+.entry-delete-button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border: 1px solid #efd4d0;
+  border-radius: 7px;
+  color: #b94f4a;
+  background: transparent;
+}
+.entry-delete-button:hover { color: #fff; border-color: #b94f4a; background: #b94f4a; }
 .expenses-section { margin-top: 20px; }
 .expense-summary-grid {
   display: grid;

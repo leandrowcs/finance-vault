@@ -8,6 +8,7 @@ import {
   CircleCheck,
   Pencil,
   ReceiptText,
+  Trash2,
   Users,
   X,
 } from "lucide-react";
@@ -15,7 +16,7 @@ import { useMemo, useState } from "react";
 import { financePeriods, type SeedPayPeriod } from "../data/financeSeed";
 import { FloatingActionButton } from "../components/FloatingActionButton";
 import { MovementModal } from "../components/MovementModal";
-import { currency, dueDate, monthLabels } from "../lib/finance";
+import { cgiPaymentLabel, currency, dueDate, monthLabels } from "../lib/finance";
 import type { Bill, Movement } from "../types/finance";
 
 type Person = "Leandro" | "Ketlin";
@@ -60,6 +61,7 @@ type DashboardPageProps = {
   daysUntilNextPayment: number;
   onToggleBill: (key: string) => void;
   isBillPaid: (key: string) => boolean;
+  onDeleteMovement: (movementId: string) => void;
   onOpenCalendar: () => void;
   onOpenMovement: () => void;
 };
@@ -110,11 +112,13 @@ function MonthDetailsModal({
   onClose,
   onToggleBill,
   onEdit,
+  onDeleteMovement,
 }: {
   month: MonthSummary;
   onClose: () => void;
   onToggleBill: (key: string) => void;
   onEdit: (movement: Movement) => void;
+  onDeleteMovement: (movementId: string) => void;
 }) {
   const hasIncome = month.incomeTotal > 0;
   const hasExpenses = month.expenseTotal > 0;
@@ -211,6 +215,16 @@ function MonthDetailsModal({
                         >
                           <Pencil size={14} />
                         </button>
+                        {!income.movement.id.startsWith("period-income:") && (
+                          <button
+                            className="entry-delete-button"
+                            type="button"
+                            aria-label={`Excluir receita ${income.label}`}
+                            onClick={() => onDeleteMovement(income.movement.id)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </article>
                     ))
                   )}
@@ -342,6 +356,16 @@ function MonthDetailsModal({
                             >
                               <Pencil size={14} />
                             </button>
+                            {editKey.startsWith("movement:") && (
+                              <button
+                                className="entry-delete-button"
+                                type="button"
+                                aria-label={`Excluir despesa ${bill.name}`}
+                                onClick={() => onDeleteMovement(editKey.replace("movement:", ""))}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
                             <button
                               className={
                                 bill.paid
@@ -384,6 +408,7 @@ export function DashboardPage({
   daysUntilNextPayment,
   onToggleBill,
   isBillPaid,
+  onDeleteMovement,
   onOpenCalendar,
   onOpenMovement,
 }: DashboardPageProps) {
@@ -516,7 +541,7 @@ export function DashboardPage({
                 owner,
                 paid: isBillPaid(toggleKey),
               },
-              incomeLabel: period.label,
+              incomeLabel: cgiPaymentLabel(expenseDate),
               expenseDate,
               toggleKey,
               editKey,
@@ -530,7 +555,7 @@ export function DashboardPage({
             const toggleKey = billMovementKey(movement.id);
             return {
               bill: movementBill(movement, isBillPaid(toggleKey)),
-              incomeLabel: "Despesa registrada",
+              incomeLabel: cgiPaymentLabel(new Date(`${movement.date}T12:00:00`)),
               expenseDate: new Date(`${movement.date}T12:00:00`),
               toggleKey,
               editKey: `movement:${movement.id}`,
@@ -836,6 +861,7 @@ export function DashboardPage({
           month={selectedMonth}
           onClose={() => setSelectedMonthKey(null)}
           onToggleBill={onToggleBill}
+          onDeleteMovement={onDeleteMovement}
           onEdit={setEditingMovement}
         />
       )}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
-import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
+import { collection, deleteDoc, doc, onSnapshot, setDoc } from "firebase/firestore";
 import { financePeriods, totalIncome } from "./data/financeSeed";
 import { AppNavigation } from "./components/AppNavigation";
 import { AppTopbar } from "./components/AppTopbar";
@@ -31,6 +31,10 @@ function movementsStorageKey(user: User | null) {
   return user ? `financevault:movements:${user.uid}` : "financevault:movements";
 }
 
+function billsStorageKey(user: User | null) {
+  return user ? `financevault:bills:${user.uid}` : "financevault:bills";
+}
+
 function readStoredMovements(user: User | null) {
   try {
     const stored = localStorage.getItem(movementsStorageKey(user));
@@ -40,8 +44,17 @@ function readStoredMovements(user: User | null) {
   }
 }
 
+function readStoredBillState(user: User | null) {
+  try {
+    const stored = localStorage.getItem(billsStorageKey(user));
+    return stored ? JSON.parse(stored) as Record<string, boolean> : {};
+  } catch {
+    return {};
+  }
+}
+
 export default function App({ user = null, onSignOut }: AppProps = {}) {
-  const [billPaidState, setBillPaidState] = useState<Record<string, boolean>>(() => Object.fromEntries(financePeriods.flatMap((period) => period.bills.map((bill) => [periodBillKey(period.date, bill.id), bill.paid]))));
+  const [billPaidState, setBillPaidState] = useState<Record<string, boolean>>(() => ({ ...Object.fromEntries(financePeriods.flatMap((period) => period.bills.map((bill) => [periodBillKey(period.date, bill.id), bill.paid]))), ...readStoredBillState(user) }));
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(new Date(openedAt.getFullYear(), openedAt.getMonth(), 1));
@@ -78,6 +91,14 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       return;
     }
   };
+  const deleteMovement = async (movementId: string) => {
+    const nextMovements = movements.filter((movement) => movement.id !== movementId);
+    setMovements(nextMovements);
+    localStorage.setItem(movementsStorageKey(user), JSON.stringify(nextMovements));
+    if (user && db) {
+      try { await deleteDoc(doc(db, "users", user.uid, "movements", movementId)); } catch { return; }
+    }
+  };
   const calendarItems = useMemo(() => {
     const items = new Map<string, CalendarItem[]>();
     const addItem = (date: string, item: CalendarItem) => items.set(date, [...(items.get(date) ?? []), item]);
@@ -93,10 +114,14 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const nextPaymentDate = new Date(`${nextPaymentPeriod.date}T12:00:00`);
   const daysUntilNextPayment = Math.max(0, Math.ceil((nextPaymentDate.getTime() - openedAt.getTime()) / 86400000));
   const changeCalendarMonth = (offset: number) => { setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1)); setSelectedDay(null); };
-  const toggleBill = (key: string) => setBillPaidState((current) => ({ ...current, [key]: !current[key] }));
+  const toggleBill = (key: string) => setBillPaidState((current) => {
+    const nextState = { ...current, [key]: !current[key] };
+    localStorage.setItem(billsStorageKey(user), JSON.stringify(nextState));
+    return nextState;
+  });
   const isBillPaid = (key: string) => Boolean(billPaidState[key]);
   const handleSignOut = async () => { if (!onSignOut) return; setIsSigningOut(true); setSignOutError(""); try { await onSignOut(); } catch { setSignOutError("Não foi possível sair agora."); setIsSigningOut(false); } };
 
   if (!movementsLoaded) return null;
-  return <main className="app-shell"><AppNavigation isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} /><section className="content"><AppTopbar user={user} calendarMonth={calendarMonth} initials={initials} onMenuOpen={() => setIsMenuOpen(true)} onCalendarOpen={() => setIsCalendarOpen(true)} onProfileOpen={() => setIsProfileOpen(true)} />{isCalendarOpen ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} onClose={() => setIsCalendarOpen(false)} /> : <DashboardPage movements={movements} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} isBillPaid={isBillPaid} onOpenCalendar={() => setIsCalendarOpen(true)} onOpenMovement={() => setIsMovementModalOpen(true)} />}{isProfileOpen && <ProfileModal user={user} displayName={displayName} initials={initials} signOutError={signOutError} isSigningOut={isSigningOut} onClose={() => setIsProfileOpen(false)} onSignOut={onSignOut ? () => void handleSignOut() : undefined} />}{isMovementModalOpen && <MovementModal onClose={() => setIsMovementModalOpen(false)} onSubmit={(movement) => { void saveMovement(movement); setBillPaidState((current) => ({ ...current, [movementBillKey(movement.id)]: false })); setIsMovementModalOpen(false); }} />}</section></main>;
+  return <main className="app-shell"><AppNavigation isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} /><section className="content"><AppTopbar user={user} calendarMonth={calendarMonth} initials={initials} onMenuOpen={() => setIsMenuOpen(true)} onCalendarOpen={() => setIsCalendarOpen(true)} onProfileOpen={() => setIsProfileOpen(true)} />{isCalendarOpen ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} onClose={() => setIsCalendarOpen(false)} /> : <DashboardPage movements={movements} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onOpenCalendar={() => setIsCalendarOpen(true)} onOpenMovement={() => setIsMovementModalOpen(true)} />}{isProfileOpen && <ProfileModal user={user} displayName={displayName} initials={initials} signOutError={signOutError} isSigningOut={isSigningOut} onClose={() => setIsProfileOpen(false)} onSignOut={onSignOut ? () => void handleSignOut() : undefined} />}{isMovementModalOpen && <MovementModal onClose={() => setIsMovementModalOpen(false)} onSubmit={(movement) => { void saveMovement(movement); setBillPaidState((current) => ({ ...current, [movementBillKey(movement.id)]: false })); setIsMovementModalOpen(false); }} />}</section></main>;
 }
