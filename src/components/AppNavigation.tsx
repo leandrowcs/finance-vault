@@ -10,7 +10,7 @@ import {
   X,
 } from "lucide-react";
 
-export type NavigationView = "dashboard" | "payments";
+export type NavigationView = "dashboard" | "payments" | "bills" | "income" | "goals" | "members" | "settings";
 type AppNavigationProps = {
   isOpen: boolean;
   onClose: () => void;
@@ -72,29 +72,29 @@ export function AppNavigation({
             <CalendarDays size={17} />
             Pagamentos<span className="nav-count">26</span>
           </button>
-          <a className="nav-link" href="#bills" onClick={onClose}>
+          <button className={`nav-link${activeView === "bills" ? " active" : ""}`} type="button" onClick={() => { onNavigate("bills"); onClose(); }}>
             <ReceiptText size={17} />
             Contas<span className="nav-count">12</span>
-          </a>
+          </button>
           <span className="nav-label spaced">Planejamento</span>
-          <a className="nav-link" href="#income" onClick={onClose}>
+          <button className={`nav-link${activeView === "income" ? " active" : ""}`} type="button" onClick={() => { onNavigate("income"); onClose(); }}>
             <ArrowUpRight size={17} />
             Receitas
-          </a>
-          <a className="nav-link" href="#goals" onClick={onClose}>
+          </button>
+          <button className={`nav-link${activeView === "goals" ? " active" : ""}`} type="button" onClick={() => { onNavigate("goals"); onClose(); }}>
             <Sparkles size={17} />
             Objetivos
-          </a>
+          </button>
         </nav>
         <div className="sidebar-bottom">
-          <a className="nav-link" href="#members" onClick={onClose}>
+          <button className={`nav-link${activeView === "members" ? " active" : ""}`} type="button" onClick={() => { onNavigate("members"); onClose(); }}>
             <Users size={17} />
             Membros
-          </a>
-          <a className="nav-link" href="#settings" onClick={onClose}>
+          </button>
+          <button className={`nav-link${activeView === "settings" ? " active" : ""}`} type="button" onClick={() => { onNavigate("settings"); onClose(); }}>
             <Settings2 size={17} />
             Configurações
-          </a>
+          </button>
           <div className="secure-note">
             <span>
               <Check size={13} />

@@ -8,6 +8,7 @@ import { ProfileModal } from "./components/ProfileModal";
 import { MovementModal } from "./components/MovementModal";
 import { CalendarPage } from "./pages/CalendarPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { BillsPage, GoalsPage, IncomePage, MembersPage, SettingsPage } from "./pages/PlanningPages";
 import { dateKey, dueDate, nextPaymentPeriod } from "./lib/finance";
 import { db } from "./lib/firebase";
 import type { CalendarItem, Movement } from "./types/finance";
@@ -21,7 +22,8 @@ const greeting = openedAt.getHours() < 12 ? "Bom dia" : openedAt.getHours() < 18
 const openedDateLabel = new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "numeric", month: "long" }).format(openedAt);
 
 function viewFromHash(): NavigationView {
-  return typeof window !== "undefined" && window.location.hash === "#payments" ? "payments" : "dashboard";
+  const hash = typeof window !== "undefined" ? window.location.hash.slice(1) : "dashboard";
+  return ["dashboard", "payments", "bills", "income", "goals", "members", "settings"].includes(hash) ? hash as NavigationView : "dashboard";
 }
 
 function periodBillKey(periodDate: string, billId: string) {
@@ -214,7 +216,9 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   });
   const isBillPaid = (key: string) => Boolean(billPaidState[key]);
   const handleSignOut = async () => { if (!onSignOut) return; setIsSigningOut(true); setSignOutError(""); try { await onSignOut(); } catch { setSignOutError("Não foi possível sair agora."); setIsSigningOut(false); } };
+  const planningPageProps = { movements, user, displayName, initials, storageKey: user?.uid ?? "local", onSignOut: onSignOut ? () => void handleSignOut() : undefined, onToggleBill: toggleBill, isBillPaid };
+  const pageContent = activeView === "payments" ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} /> : activeView === "dashboard" ? <DashboardPage movements={movements} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onSaveMovement={(movement) => { void saveMovement(movement); }} sharedEntryOverrides={entryOverrides} onEntryOverridesChange={(overrides) => { void saveEntryOverrides(overrides); }} onOpenCalendar={() => changeView("payments")} onOpenMovement={() => setIsMovementModalOpen(true)} storageKey={user?.uid ?? "local"} /> : activeView === "bills" ? <BillsPage {...planningPageProps} /> : activeView === "income" ? <IncomePage {...planningPageProps} /> : activeView === "goals" ? <GoalsPage {...planningPageProps} /> : activeView === "members" ? <MembersPage {...planningPageProps} /> : <SettingsPage {...planningPageProps} />;
 
   if (!movementsLoaded) return null;
-  return <main className="app-shell"><AppNavigation isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} activeView={activeView} onNavigate={changeView} /><section className="content"><AppTopbar user={user} calendarMonth={calendarMonth} initials={initials} onMenuOpen={() => setIsMenuOpen(true)} onCalendarOpen={() => changeView("payments")} onDashboard={() => changeView("dashboard")} onProfileOpen={() => setIsProfileOpen(true)} />{activeView === "payments" ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} onClose={() => changeView("dashboard")} /> : <DashboardPage movements={movements} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onSaveMovement={(movement) => { void saveMovement(movement); }} sharedEntryOverrides={entryOverrides} onEntryOverridesChange={(overrides) => { void saveEntryOverrides(overrides); }} onOpenCalendar={() => changeView("payments")} onOpenMovement={() => setIsMovementModalOpen(true)} storageKey={user?.uid ?? "local"} />}{isProfileOpen && <ProfileModal user={user} displayName={displayName} initials={initials} signOutError={signOutError} isSigningOut={isSigningOut} onClose={() => setIsProfileOpen(false)} onSignOut={onSignOut ? () => void handleSignOut() : undefined} />}{isMovementModalOpen && <MovementModal onClose={() => setIsMovementModalOpen(false)} onSubmit={(movement) => { void saveMovement(movement); setBillPaidState((current) => ({ ...current, [movementBillKey(movement.id)]: false })); setIsMovementModalOpen(false); }} />}</section></main>;
+  return <main className="app-shell"><AppNavigation isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} activeView={activeView} onNavigate={changeView} /><section className="content"><AppTopbar user={user} calendarMonth={calendarMonth} isCalendarView={activeView === "payments"} initials={initials} onMenuOpen={() => setIsMenuOpen(true)} onCalendarOpen={() => changeView("payments")} onDashboard={() => changeView("dashboard")} onProfileOpen={() => setIsProfileOpen(true)} />{pageContent}{isProfileOpen && <ProfileModal user={user} displayName={displayName} initials={initials} signOutError={signOutError} isSigningOut={isSigningOut} onClose={() => setIsProfileOpen(false)} onSignOut={onSignOut ? () => void handleSignOut() : undefined} />}{isMovementModalOpen && <MovementModal onClose={() => setIsMovementModalOpen(false)} onSubmit={(movement) => { void saveMovement(movement); setBillPaidState((current) => ({ ...current, [movementBillKey(movement.id)]: false })); setIsMovementModalOpen(false); }} />}</section></main>;
 }

@@ -1,10 +1,10 @@
-import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { currency, dateKey, monthLabels } from "../lib/finance";
 import type { CalendarItem } from "../types/finance";
 
-type CalendarPageProps = { calendarMonth: Date; calendarItems: Map<string, CalendarItem[]>; selectedDay: string | null; onChangeMonth: (offset: number) => void; onSelectDay: (day: string) => void; onClose: () => void };
+type CalendarPageProps = { calendarMonth: Date; calendarItems: Map<string, CalendarItem[]>; selectedDay: string | null; onChangeMonth: (offset: number) => void; onSelectDay: (day: string) => void };
 
-export function CalendarPage({ calendarMonth, calendarItems, selectedDay, onChangeMonth, onSelectDay, onClose }: CalendarPageProps) {
+export function CalendarPage({ calendarMonth, calendarItems, selectedDay, onChangeMonth, onSelectDay }: CalendarPageProps) {
   const firstDay = calendarMonth.getDay();
   const daysInMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate();
   const cells = Array.from({ length: firstDay + daysInMonth }, (_, index) => index < firstDay ? null : index - firstDay + 1);
@@ -22,7 +22,6 @@ export function CalendarPage({ calendarMonth, calendarItems, selectedDay, onChan
             <button className="icon-button calendar-nav-button" type="button" aria-label="Mês anterior" title="Mês anterior" onClick={() => onChangeMonth(-1)}><ChevronLeft size={18} /></button>
             <button className="icon-button calendar-nav-button" type="button" aria-label="Próximo mês" title="Próximo mês" onClick={() => onChangeMonth(1)}><ChevronRight size={18} /></button>
           </div>
-          <button className="outline-button calendar-back-button" type="button" onClick={onClose}><ArrowLeft size={15} />Voltar ao dashboard</button>
         </div>
       </div>
       <div className="calendar-legend"><span><i className="calendar-dot income" /> Receita</span><span><i className="calendar-dot bill" /> Conta a pagar</span></div>
