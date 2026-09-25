@@ -1474,7 +1474,7 @@
 .person-avatar.ketlin { background: #c5dfc8; }
 .income-card,
 .expense-card {
-  padding: 10px 0;
+  padding: 5px 0;
   border-top: 1px solid #edf0ec;
 }
 .income-card,
@@ -1558,7 +1558,7 @@
 }
 .related-income-card small { display: flex; align-items: center; gap: 5px; color: #77907e; }
 .expense-column { background: #fbfcf9; }
-.expense-card-main { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.expense-card-main { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
 .expense-category { display: flex; align-items: center; gap: 8px; min-width: 0; color: #8da198; }
 .expense-category > div { min-width: 0; }
 .expense-category strong,
@@ -1567,7 +1567,7 @@
 .expense-category span { margin-top: 3px; color: var(--muted); font-size: 9px; }
 .expense-amount { color: var(--ink); font-size: 11px; white-space: nowrap; }
 .paid-amount { color: #8b9b92; text-decoration: line-through; }
-.expense-card-meta { gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+.expense-card-meta { gap: 10px; margin-top: 5px; flex-wrap: wrap; }
 .expense-card-meta span { gap: 4px; }
 .expense-card-meta span:nth-child(2) { color: #6f8b78; }
 .expense-card-meta .check-control { margin-left: auto; }

@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { financePeriods, type SeedPayPeriod } from "../data/financeSeed";
 import { FloatingActionButton } from "../components/FloatingActionButton";
 import { MovementModal } from "../components/MovementModal";
-import { cgiPaymentLabel, currency, dueDate, monthLabels } from "../lib/finance";
+import { cgiPaymentLabel, currency, dateKey, dueDate, monthLabels } from "../lib/finance";
 import type { Bill, Movement } from "../types/finance";
 
 type Person = "Leandro" | "Ketlin";
@@ -611,25 +611,24 @@ export function DashboardPage({
       );
       const incomeTotal = incomeByPerson.Leandro + incomeByPerson.Ketlin;
       const label = monthLabel(date);
-      const relatedExpenseCards = [
-        ...periods.map((period) => ({
-          id: `period-${period.date}`,
-          label: period.label,
-          amount: period.bills.reduce((sum, bill) => {
-            const override = entryOverrides[`period-expense:${period.date}:${bill.id}`];
-            if (override?.deleted) return sum;
-            return sum + (override?.amount ?? bill.amount);
-          }, 0),
-          date: period.date,
-        })),
-        ...expenseMovements.map((movement) => ({
-          id: `movement-${movement.id}`,
-          label: dateFormatter.format(new Date(`${movement.date}T12:00:00`)),
-          amount: movement.amount,
-          date: movement.date,
-          isMovement: true,
-        })),
-      ];
+      const relatedExpensesByIncome = new Map<string, { amount: number; date: string }>();
+      billsByPerson.forEach(({ bills }) => {
+        bills.forEach(({ bill, incomeLabel, expenseDate }) => {
+          const current = relatedExpensesByIncome.get(incomeLabel);
+          relatedExpensesByIncome.set(incomeLabel, {
+            amount: (current?.amount ?? 0) + allocatedAmount(bill.amount, bill.owner),
+            date: current?.date ?? dateKey(expenseDate),
+          });
+        });
+      });
+      const relatedExpenseCards = [...relatedExpensesByIncome.entries()].map(
+        ([incomeLabel, relatedExpense]) => ({
+          id: `income-${key}-${incomeLabel}`,
+          label: incomeLabel,
+          amount: relatedExpense.amount,
+          date: relatedExpense.date,
+        }),
+      );
 
       return {
         key,
