@@ -71,6 +71,35 @@ function readDeletedMovementIds(user: User | null) {
   }
 }
 
+function addRecurrenceDate(date: string, recurrence: NonNullable<Movement["recurrence"]>, index: number) {
+  const nextDate = new Date(`${date}T12:00:00`);
+  if (recurrence === "biweekly") nextDate.setDate(nextDate.getDate() + index * 14);
+  if (recurrence === "monthly" || recurrence === "yearly") {
+    const originalDay = nextDate.getDate();
+    const targetMonth = nextDate.getMonth() + (recurrence === "monthly" ? index : index * 12);
+    nextDate.setDate(1);
+    nextDate.setMonth(targetMonth);
+    const lastDay = new Date(nextDate.getFullYear(), nextDate.getMonth() + 1, 0).getDate();
+    nextDate.setDate(Math.min(originalDay, lastDay));
+  }
+  return `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}-${String(nextDate.getDate()).padStart(2, "0")}`;
+}
+
+function expandRecurringMovement(movement: Movement) {
+  const recurrence = movement.recurrence ?? "none";
+  const count = recurrence === "none" ? 1 : Math.min(120, Math.max(1, movement.recurrenceCount ?? 1));
+  const recurrenceId = movement.recurrenceId ?? movement.id;
+  return Array.from({ length: count }, (_, index) => ({
+    ...movement,
+    id: index === 0 ? movement.id : `${recurrenceId}:${index}`,
+    date: recurrence === "none" ? movement.date : addRecurrenceDate(movement.date, recurrence, index),
+    recurrence,
+    recurrenceCount: count,
+    recurrenceId: recurrence === "none" ? undefined : recurrenceId,
+    recurrenceIndex: recurrence === "none" ? undefined : index,
+  }));
+}
+
 export default function App({ user = null, onSignOut }: AppProps = {}) {
   const [billPaidState, setBillPaidState] = useState<Record<string, boolean>>(() => ({ ...Object.fromEntries(financePeriods.flatMap((period) => period.bills.map((bill) => [periodBillKey(period.date, bill.id), bill.paid]))), ...readStoredBillState(user) }));
   const [entryOverrides, setEntryOverrides] = useState<EntryOverrides | undefined>();
@@ -121,13 +150,13 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     setMovementsLoaded(true);
   }, [user]);
   const saveMovement = async (movement: Movement) => {
-    const nextMovements = [...movements.filter((item) => item.id !== movement.id), movement];
+    const savedMovements = expandRecurringMovement(movement);
+    const savedIds = new Set(savedMovements.map((item) => item.id));
+    const nextMovements = [...movements.filter((item) => !savedIds.has(item.id) && item.id !== movement.id), ...savedMovements];
     setMovements(nextMovements);
     localStorage.setItem(movementsStorageKey(user), JSON.stringify(nextMovements));
     if (user && db) {
-      try {
-        await setDoc(doc(db, "users", user.uid, "movements", movement.id), movement);
-      } catch { return; }
+      try { await Promise.all(savedMovements.map((savedMovement) => setDoc(doc(db!, "users", user.uid, "movements", savedMovement.id), savedMovement))); } catch { return; }
       return;
     }
   };

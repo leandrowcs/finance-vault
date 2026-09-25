@@ -168,7 +168,6 @@ function MonthDetailsModal({
           <section className="month-section" aria-labelledby="income-title">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">{month.label.toUpperCase()}</p>
                 <h2 id="income-title">Receitas do mês</h2>
               </div>
               <span className="section-caption">

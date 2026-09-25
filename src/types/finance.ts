@@ -2,6 +2,7 @@ import type { SeedBill } from "../data/financeSeed";
 
 export type Owner = "Você" | "Esposa" | "Compartilhado";
 export type Bill = SeedBill;
+export type Recurrence = "none" | "biweekly" | "monthly" | "yearly";
 
 export type Movement = {
   id: string;
@@ -11,6 +12,10 @@ export type Movement = {
   description: string;
   category: string;
   owner: Owner;
+  recurrence?: Recurrence;
+  recurrenceCount?: number;
+  recurrenceId?: string;
+  recurrenceIndex?: number;
 };
 
 export type CalendarItem = {
