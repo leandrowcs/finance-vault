@@ -1443,16 +1443,16 @@
 }
 .person-column {
   min-width: 0;
-  padding: 17px;
+  padding: 10px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--paper);
 }
 .column-heading {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 .column-heading h3 {
   margin: 0 0 3px;
@@ -1474,7 +1474,7 @@
 .person-avatar.ketlin { background: #c5dfc8; }
 .income-card,
 .expense-card {
-  padding: 13px 0;
+  padding: 10px 0;
   border-top: 1px solid #edf0ec;
 }
 .income-card,

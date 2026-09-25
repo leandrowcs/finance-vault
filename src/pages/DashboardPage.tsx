@@ -63,6 +63,7 @@ type DashboardPageProps = {
   onDeleteMovement: (movementId: string) => void;
   onOpenCalendar: () => void;
   onOpenMovement: () => void;
+  storageKey?: string;
 };
 
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
@@ -104,6 +105,19 @@ function movementBill(movement: Movement, paid: boolean): Bill {
     category: movement.category,
     paid,
   };
+}
+
+function entryOverridesStorageKey(storageKey: string) {
+  return `financevault:entry-overrides:${storageKey}`;
+}
+
+function readEntryOverrides(storageKey: string): Record<string, EntryOverride> {
+  try {
+    const stored = localStorage.getItem(entryOverridesStorageKey(storageKey));
+    return stored ? JSON.parse(stored) as Record<string, EntryOverride> : {};
+  } catch {
+    return {};
+  }
 }
 
 function MonthDetailsModal({
@@ -388,6 +402,7 @@ export function DashboardPage({
   onDeleteMovement,
   onOpenCalendar,
   onOpenMovement,
+  storageKey = "local",
 }: DashboardPageProps) {
   const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>(
     {},
@@ -395,9 +410,16 @@ export function DashboardPage({
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [entryOverrides, setEntryOverrides] = useState<
     Record<string, EntryOverride>
-  >({});
+  >(() => readEntryOverrides(storageKey));
   const [editingMovement, setEditingMovement] = useState<Movement | null>(null);
   const currentYear = new Date().getFullYear();
+  const updateEntryOverrides = (update: (current: Record<string, EntryOverride>) => Record<string, EntryOverride>) => {
+    setEntryOverrides((current) => {
+      const next = update(current);
+      localStorage.setItem(entryOverridesStorageKey(storageKey), JSON.stringify(next));
+      return next;
+    });
+  };
 
   const months = useMemo(() => {
     return Array.from({ length: 12 }, (_, monthIndex) => {
@@ -857,13 +879,13 @@ export function DashboardPage({
           onDelete={() => {
             const movementId = editingMovement.id;
             if (movementId.startsWith("period-income:") || movementId.startsWith("period-expense:")) {
-              setEntryOverrides((current) => ({ ...current, [movementId]: { deleted: true } }));
+              updateEntryOverrides((current) => ({ ...current, [movementId]: { deleted: true } }));
               setEditingMovement(null);
               return;
             }
             const resolvedMovementId = movementId.startsWith("movement:") ? movementId.replace("movement:", "") : movementId;
             onDeleteMovement(resolvedMovementId);
-            setEntryOverrides((current) => {
+            updateEntryOverrides((current) => {
               const next = { ...current };
               delete next[movementId];
               delete next[`movement:${resolvedMovementId}`];
@@ -872,7 +894,7 @@ export function DashboardPage({
             setEditingMovement(null);
           }}
           onSubmit={(movement) => {
-            setEntryOverrides((current) => {
+            updateEntryOverrides((current) => {
               const next = { ...current, [movement.id]: { ...movement, deleted: false } };
               if (movement.id.startsWith("movement:")) return next;
               if (current[`movement:${movement.id}`] || movements.some((entry) => entry.id === movement.id)) {
