@@ -22,22 +22,28 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 12px;
+  gap: 10px;
 }
 .calendar-month-actions {
   display: flex;
   gap: 8px;
+}
+.calendar-back-button {
+  align-self: flex-start;
+  gap: 7px;
+  min-height: 34px;
+  padding: 8px 12px;
 }
 .calendar-nav-button {
   width: 34px;
   height: 34px;
   display: grid;
   place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--green);
-  color: #fff;
-  border-color: var(--green);
+  border: 1px solid var(--line) !important;
+  border-radius: 10px;
+  background: var(--green) !important;
+  color: var(--cream) !important;
+  border-color: var(--green) !important;
 }
 .calendar-nav-button:hover {
   background: #14483d;
@@ -171,18 +177,22 @@
     background: rgba(24, 49, 47, 0.32);
   }
   .calendar-page {
-    padding: 31px 18px 25px;
+    padding: 10px;
   }
   .calendar-heading {
     display: block;
   }
   .calendar-actions {
-    margin-top: 20px;
+    margin-top: 10px;
     align-items: stretch;
   }
   .calendar-actions .outline-button {
     width: 100%;
     justify-content: center;
+  }
+  .calendar-actions .calendar-back-button {
+    width: auto;
+    align-self: flex-start;
   }
   .calendar-day {
     min-height: 68px;
@@ -468,12 +478,17 @@
   margin-top: 25px;
 }
 .nav-link {
+  width: 100%;
+  border: 0;
+  font-family: inherit;
   text-decoration: none;
   color: #a5b9ae;
   padding: 10px;
   border-radius: 10px;
   font-size: 12px;
   font-weight: 500;
+  text-align: left;
+  cursor: pointer;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -545,11 +560,15 @@
   background: rgba(255, 254, 250);
 }
 .crumbs {
+  padding: 0;
+  border: 0;
+  background: transparent;
   display: flex;
   align-items: center;
   color: #99a5a0;
-  font-size: 15px;
+  font-size: 20px;
   text-transform: uppercase;
+  cursor: pointer;
 }
 .crumbs strong {
   color: var(--green);
@@ -1163,6 +1182,7 @@
   }
   .page-heading h1 {
     font-size: 27px;
+    text-transform: uppercase;
   }
   .primary-button {
     margin-top: 5px;
