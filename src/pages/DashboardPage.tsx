@@ -11,7 +11,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { financePeriods, type SeedPayPeriod } from "../data/financeSeed";
 import { FloatingActionButton } from "../components/FloatingActionButton";
 import { MovementModal } from "../components/MovementModal";
@@ -34,6 +34,7 @@ type IncomeEntry = {
   movement: Movement;
 };
 type EntryOverride = Partial<Movement> & { deleted?: boolean };
+type EntryOverrides = Record<string, EntryOverride>;
 type MonthSummary = {
   key: string;
   label: string;
@@ -62,6 +63,8 @@ type DashboardPageProps = {
   isBillPaid: (key: string) => boolean;
   onDeleteMovement: (movementId: string) => void;
   onSaveMovement: (movement: Movement) => void;
+  sharedEntryOverrides?: EntryOverrides;
+  onEntryOverridesChange?: (overrides: EntryOverrides) => void;
   onOpenCalendar: () => void;
   onOpenMovement: () => void;
   storageKey?: string;
@@ -401,6 +404,8 @@ export function DashboardPage({
   isBillPaid,
   onDeleteMovement,
   onSaveMovement,
+  sharedEntryOverrides,
+  onEntryOverridesChange,
   onOpenCalendar,
   onOpenMovement,
   storageKey = "local",
@@ -414,10 +419,16 @@ export function DashboardPage({
   >(() => readEntryOverrides(storageKey));
   const [editingMovement, setEditingMovement] = useState<Movement | null>(null);
   const currentYear = new Date().getFullYear();
+  useEffect(() => {
+    if (sharedEntryOverrides === undefined) return;
+    setEntryOverrides(sharedEntryOverrides);
+    localStorage.setItem(entryOverridesStorageKey(storageKey), JSON.stringify(sharedEntryOverrides));
+  }, [sharedEntryOverrides, storageKey]);
   const updateEntryOverrides = (update: (current: Record<string, EntryOverride>) => Record<string, EntryOverride>) => {
     setEntryOverrides((current) => {
       const next = update(current);
       localStorage.setItem(entryOverridesStorageKey(storageKey), JSON.stringify(next));
+      onEntryOverridesChange?.(next);
       return next;
     });
   };

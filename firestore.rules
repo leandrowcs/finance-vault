@@ -37,5 +37,9 @@ service cloud.firestore {
     match /users/{userId}/movements/{movementId} {
       allow read, write: if signedIn() && request.auth.uid == userId;
     }
+
+    match /users/{userId}/settings/{settingId} {
+      allow read, write: if signedIn() && request.auth.uid == userId;
+    }
   }
 }

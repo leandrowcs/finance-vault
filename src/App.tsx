@@ -14,6 +14,7 @@ import type { CalendarItem, Movement } from "./types/finance";
 import "./App.css";
 
 type AppProps = { user?: User | null; onSignOut?: () => Promise<void> };
+type EntryOverrides = Record<string, Partial<Movement> & { deleted?: boolean }>;
 
 const openedAt = new Date();
 const greeting = openedAt.getHours() < 12 ? "Bom dia" : openedAt.getHours() < 18 ? "Boa tarde" : "Boa noite";
@@ -37,6 +38,10 @@ function billsStorageKey(user: User | null) {
 
 function deletedMovementsStorageKey(user: User | null) {
   return user ? `financevault:deleted-movements:${user.uid}` : "financevault:deleted-movements";
+}
+
+function sharedStateRef(user: User) {
+  return doc(db!, "users", user.uid, "settings", "shared");
 }
 
 function readStoredMovements(user: User | null) {
@@ -68,6 +73,7 @@ function readDeletedMovementIds(user: User | null) {
 
 export default function App({ user = null, onSignOut }: AppProps = {}) {
   const [billPaidState, setBillPaidState] = useState<Record<string, boolean>>(() => ({ ...Object.fromEntries(financePeriods.flatMap((period) => period.bills.map((bill) => [periodBillKey(period.date, bill.id), bill.paid]))), ...readStoredBillState(user) }));
+  const [entryOverrides, setEntryOverrides] = useState<EntryOverrides | undefined>();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(new Date(openedAt.getFullYear(), openedAt.getMonth(), 1));
@@ -80,10 +86,11 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const [movementsLoaded, setMovementsLoaded] = useState(false);
   useEffect(() => {
     setMovementsLoaded(false);
+    setEntryOverrides(undefined);
     const storedMovements = readStoredMovements(user);
     setMovements(storedMovements);
     if (user && db) {
-      return onSnapshot(collection(db, "users", user.uid, "movements"), (snapshot) => {
+      const unsubscribeMovements = onSnapshot(collection(db, "users", user.uid, "movements"), (snapshot) => {
         const deletedMovementIds = readDeletedMovementIds(user);
         const remoteMovements = snapshot.docs
           .map((item) => item.data() as Movement)
@@ -96,6 +103,20 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
         setMovements([...movementsById.values()]);
         setMovementsLoaded(true);
       }, () => setMovementsLoaded(true));
+      const unsubscribeSharedState = onSnapshot(sharedStateRef(user), (snapshot) => {
+        const sharedState = snapshot.data() as { billPaidState?: Record<string, boolean>; entryOverrides?: EntryOverrides } | undefined;
+        if (sharedState?.billPaidState) {
+          setBillPaidState((current) => ({ ...current, ...sharedState.billPaidState }));
+          localStorage.setItem(billsStorageKey(user), JSON.stringify(sharedState.billPaidState));
+        }
+        const nextEntryOverrides = sharedState?.entryOverrides ?? {};
+        setEntryOverrides(nextEntryOverrides);
+        localStorage.setItem(`financevault:entry-overrides:${user.uid}`, JSON.stringify(nextEntryOverrides));
+      });
+      return () => {
+        unsubscribeMovements();
+        unsubscribeSharedState();
+      };
     }
     setMovementsLoaded(true);
   }, [user]);
@@ -121,6 +142,13 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       try { await deleteDoc(doc(db, "users", user.uid, "movements", movementId)); } catch { return; }
     }
   };
+  const saveEntryOverrides = async (nextEntryOverrides: EntryOverrides) => {
+    setEntryOverrides(nextEntryOverrides);
+    localStorage.setItem(`financevault:entry-overrides:${user?.uid ?? "local"}`, JSON.stringify(nextEntryOverrides));
+    if (user && db) {
+      try { await setDoc(sharedStateRef(user), { entryOverrides: nextEntryOverrides }, { merge: true }); } catch { return; }
+    }
+  };
   const calendarItems = useMemo(() => {
     const items = new Map<string, CalendarItem[]>();
     const addItem = (date: string, item: CalendarItem) => items.set(date, [...(items.get(date) ?? []), item]);
@@ -139,11 +167,12 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const toggleBill = (key: string) => setBillPaidState((current) => {
     const nextState = { ...current, [key]: !current[key] };
     localStorage.setItem(billsStorageKey(user), JSON.stringify(nextState));
+    if (user && db) void setDoc(sharedStateRef(user), { billPaidState: nextState }, { merge: true });
     return nextState;
   });
   const isBillPaid = (key: string) => Boolean(billPaidState[key]);
   const handleSignOut = async () => { if (!onSignOut) return; setIsSigningOut(true); setSignOutError(""); try { await onSignOut(); } catch { setSignOutError("Não foi possível sair agora."); setIsSigningOut(false); } };
 
   if (!movementsLoaded) return null;
-  return <main className="app-shell"><AppNavigation isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} /><section className="content"><AppTopbar user={user} calendarMonth={calendarMonth} initials={initials} onMenuOpen={() => setIsMenuOpen(true)} onCalendarOpen={() => setIsCalendarOpen(true)} onProfileOpen={() => setIsProfileOpen(true)} />{isCalendarOpen ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} onClose={() => setIsCalendarOpen(false)} /> : <DashboardPage movements={movements} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onSaveMovement={(movement) => { void saveMovement(movement); }} onOpenCalendar={() => setIsCalendarOpen(true)} onOpenMovement={() => setIsMovementModalOpen(true)} storageKey={user?.uid ?? "local"} />}{isProfileOpen && <ProfileModal user={user} displayName={displayName} initials={initials} signOutError={signOutError} isSigningOut={isSigningOut} onClose={() => setIsProfileOpen(false)} onSignOut={onSignOut ? () => void handleSignOut() : undefined} />}{isMovementModalOpen && <MovementModal onClose={() => setIsMovementModalOpen(false)} onSubmit={(movement) => { void saveMovement(movement); setBillPaidState((current) => ({ ...current, [movementBillKey(movement.id)]: false })); setIsMovementModalOpen(false); }} />}</section></main>;
+  return <main className="app-shell"><AppNavigation isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} /><section className="content"><AppTopbar user={user} calendarMonth={calendarMonth} initials={initials} onMenuOpen={() => setIsMenuOpen(true)} onCalendarOpen={() => setIsCalendarOpen(true)} onProfileOpen={() => setIsProfileOpen(true)} />{isCalendarOpen ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} onClose={() => setIsCalendarOpen(false)} /> : <DashboardPage movements={movements} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onSaveMovement={(movement) => { void saveMovement(movement); }} sharedEntryOverrides={entryOverrides} onEntryOverridesChange={(overrides) => { void saveEntryOverrides(overrides); }} onOpenCalendar={() => setIsCalendarOpen(true)} onOpenMovement={() => setIsMovementModalOpen(true)} storageKey={user?.uid ?? "local"} />}{isProfileOpen && <ProfileModal user={user} displayName={displayName} initials={initials} signOutError={signOutError} isSigningOut={isSigningOut} onClose={() => setIsProfileOpen(false)} onSignOut={onSignOut ? () => void handleSignOut() : undefined} />}{isMovementModalOpen && <MovementModal onClose={() => setIsMovementModalOpen(false)} onSubmit={(movement) => { void saveMovement(movement); setBillPaidState((current) => ({ ...current, [movementBillKey(movement.id)]: false })); setIsMovementModalOpen(false); }} />}</section></main>;
 }
