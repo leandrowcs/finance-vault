@@ -581,7 +581,11 @@ export function DashboardPage({
         ...periods.map((period) => ({
           id: `period-${period.date}`,
           label: period.label,
-          amount: period.bills.reduce((sum, bill) => sum + bill.amount, 0),
+          amount: period.bills.reduce((sum, bill) => {
+            const override = entryOverrides[`period-expense:${period.date}:${bill.id}`];
+            if (override?.deleted) return sum;
+            return sum + (override?.amount ?? bill.amount);
+          }, 0),
           date: period.date,
         })),
         ...expenseMovements.map((movement) => ({
