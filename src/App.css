@@ -482,7 +482,8 @@
   border: 0;
   font-family: inherit;
   text-decoration: none;
-  color: #a5b9ae;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
   padding: 10px;
   border-radius: 10px;
   font-size: 12px;
