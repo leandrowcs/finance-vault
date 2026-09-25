@@ -334,52 +334,56 @@ function MonthDetailsModal({
                             </strong>
                           </div>
                           <div className="expense-card-meta">
-                            <span>
-                              <CalendarDays size={13} />
-                              Vence em {dateFormatter.format(expenseDate)}
-                            </span>
-                            <span>
-                              <ArrowUpRight size={13} />
-                              Receita: {incomeLabel}
-                            </span>
-                            <button
-                              className="entry-edit-button"
-                              type="button"
-                              aria-label={`Editar despesa ${bill.name}`}
-                              onClick={() =>
-                                onEdit({
-                                  id: editKey,
-                                  type: "expense",
-                                  amount: bill.amount,
-                                  date: `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, "0")}-${String(expenseDate.getDate()).padStart(2, "0")}`,
-                                  description: bill.name,
-                                  category: bill.category,
-                                  owner: bill.owner,
-                                })
-                              }
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button
-                              className={
-                                bill.paid
-                                  ? "check-control checked"
-                                  : "check-control"
-                              }
-                              type="button"
-                              aria-label={
-                                bill.paid
-                                  ? `Desmarcar ${bill.name}`
-                                  : `Marcar ${bill.name} como paga`
-                              }
-                              onClick={() => onToggleBill(toggleKey)}
-                            >
-                              {bill.paid ? (
-                                <CircleCheck size={18} />
-                              ) : (
-                                <Circle size={18} />
-                              )}
-                            </button>
+                            <div className="expense-card-meta-info">
+                              <span>
+                                <CalendarDays size={13} />
+                                Vence em {dateFormatter.format(expenseDate)}
+                              </span>
+                              <span>
+                                <ArrowUpRight size={13} />
+                                Receita: {incomeLabel}
+                              </span>
+                            </div>
+                            <div className="expense-card-actions">
+                              <button
+                                className="entry-edit-button"
+                                type="button"
+                                aria-label={`Editar despesa ${bill.name}`}
+                                onClick={() =>
+                                  onEdit({
+                                    id: editKey,
+                                    type: "expense",
+                                    amount: bill.amount,
+                                    date: `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, "0")}-${String(expenseDate.getDate()).padStart(2, "0")}`,
+                                    description: bill.name,
+                                    category: bill.category,
+                                    owner: bill.owner,
+                                  })
+                                }
+                              >
+                                <Pencil size={14} />
+                              </button>
+                              <button
+                                className={
+                                  bill.paid
+                                    ? "check-control checked"
+                                    : "check-control"
+                                }
+                                type="button"
+                                aria-label={
+                                  bill.paid
+                                    ? `Desmarcar ${bill.name}`
+                                    : `Marcar ${bill.name} como paga`
+                                }
+                                onClick={() => onToggleBill(toggleKey)}
+                              >
+                                {bill.paid ? (
+                                  <CircleCheck size={18} />
+                                ) : (
+                                  <Circle size={18} />
+                                )}
+                              </button>
+                            </div>
                           </div>
                         </article>
                       ),
