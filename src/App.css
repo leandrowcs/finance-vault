@@ -1293,6 +1293,18 @@
   border-radius: 10px;
   background: #fbfcf9;
 }
+.month-quick-summary article .income {
+    background: #e7f2e6;
+    border-color: #d3e5d2;
+}
+.month-quick-summary article .expense {
+    background: #f8e6d8;
+    border-color: #efd4c0;
+}
+.month-quick-summary article .balance {
+    background: #e7f2e6;
+    border-color: #d3e5d2;
+}
 .month-quick-summary span {
   display: block;
   color: var(--muted);
