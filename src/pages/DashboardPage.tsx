@@ -760,15 +760,15 @@ export function DashboardPage({
                 {isExpanded && (
                   <div className="month-accordion-content">
                     <div className="month-quick-summary">
-                      <article className="income">
+                      <article className="month-quick-card income">
                         <span>Receitas totais</span>
                         <strong>{currency.format(month.incomeTotal)}</strong>
                       </article>
-                      <article className="expense">
+                      <article className="month-quick-card expense">
                         <span>Despesas totais</span>
                         <strong>{currency.format(month.expenseTotal)}</strong>
                       </article>
-                      <article className="balance">
+                      <article className="month-quick-card balance">
                         <span>Balanço do mês</span>
                         <strong
                           className={
