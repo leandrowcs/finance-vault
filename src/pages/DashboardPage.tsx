@@ -8,7 +8,6 @@ import {
   CircleCheck,
   Pencil,
   ReceiptText,
-  Trash2,
   Users,
   X,
 } from "lucide-react";
@@ -34,7 +33,7 @@ type IncomeEntry = {
   amount: number;
   movement: Movement;
 };
-type EntryOverride = Partial<Movement>;
+type EntryOverride = Partial<Movement> & { deleted?: boolean };
 type MonthSummary = {
   key: string;
   label: string;
@@ -112,13 +111,11 @@ function MonthDetailsModal({
   onClose,
   onToggleBill,
   onEdit,
-  onDeleteMovement,
 }: {
   month: MonthSummary;
   onClose: () => void;
   onToggleBill: (key: string) => void;
   onEdit: (movement: Movement) => void;
-  onDeleteMovement: (movementId: string) => void;
 }) {
   const hasIncome = month.incomeTotal > 0;
   const hasExpenses = month.expenseTotal > 0;
@@ -215,16 +212,6 @@ function MonthDetailsModal({
                         >
                           <Pencil size={14} />
                         </button>
-                        {!income.movement.id.startsWith("period-income:") && (
-                          <button
-                            className="entry-delete-button"
-                            type="button"
-                            aria-label={`Excluir receita ${income.label}`}
-                            onClick={() => onDeleteMovement(income.movement.id)}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        )}
                       </article>
                     ))
                   )}
@@ -356,16 +343,6 @@ function MonthDetailsModal({
                             >
                               <Pencil size={14} />
                             </button>
-                            {editKey.startsWith("movement:") && (
-                              <button
-                                className="entry-delete-button"
-                                type="button"
-                                aria-label={`Excluir despesa ${bill.name}`}
-                                onClick={() => onDeleteMovement(editKey.replace("movement:", ""))}
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            )}
                             <button
                               className={
                                 bill.paid
@@ -452,36 +429,40 @@ export function DashboardPage({
         const ketlinKey = `period-income:${period.date}:ketlin`;
         const leandroOverride = entryOverrides[leandroKey];
         const ketlinOverride = entryOverrides[ketlinKey];
-        incomeEntriesByPerson.Leandro.push({
-          id: `${period.date}-leandro`,
-          label: leandroOverride?.description ?? "Receita recebida",
-          date: leandroOverride?.date ?? period.date,
-          amount: leandroOverride?.amount ?? period.income.leandro,
-          movement: {
-            id: leandroKey,
-            type: "income",
-            amount: leandroOverride?.amount ?? period.income.leandro,
+        if (!leandroOverride?.deleted) {
+          incomeEntriesByPerson.Leandro.push({
+            id: `${period.date}-leandro`,
+            label: leandroOverride?.description ?? "Receita recebida",
             date: leandroOverride?.date ?? period.date,
-            description: leandroOverride?.description ?? "Receita recebida",
-            category: leandroOverride?.category ?? "Salário",
-            owner: leandroOverride?.owner ?? "Você",
-          },
-        });
-        incomeEntriesByPerson.Ketlin.push({
-          id: `${period.date}-ketlin`,
-          label: ketlinOverride?.description ?? "Receita recebida",
-          date: ketlinOverride?.date ?? period.date,
-          amount: ketlinOverride?.amount ?? period.income.ketlin,
-          movement: {
-            id: ketlinKey,
-            type: "income",
-            amount: ketlinOverride?.amount ?? period.income.ketlin,
+            amount: leandroOverride?.amount ?? period.income.leandro,
+            movement: {
+              id: leandroKey,
+              type: "income",
+              amount: leandroOverride?.amount ?? period.income.leandro,
+              date: leandroOverride?.date ?? period.date,
+              description: leandroOverride?.description ?? "Receita recebida",
+              category: leandroOverride?.category ?? "Salário",
+              owner: leandroOverride?.owner ?? "Você",
+            },
+          });
+        }
+        if (!ketlinOverride?.deleted) {
+          incomeEntriesByPerson.Ketlin.push({
+            id: `${period.date}-ketlin`,
+            label: ketlinOverride?.description ?? "Receita recebida",
             date: ketlinOverride?.date ?? period.date,
-            description: ketlinOverride?.description ?? "Receita recebida",
-            category: ketlinOverride?.category ?? "Salário",
-            owner: ketlinOverride?.owner ?? "Esposa",
-          },
-        });
+            amount: ketlinOverride?.amount ?? period.income.ketlin,
+            movement: {
+              id: ketlinKey,
+              type: "income",
+              amount: ketlinOverride?.amount ?? period.income.ketlin,
+              date: ketlinOverride?.date ?? period.date,
+              description: ketlinOverride?.description ?? "Receita recebida",
+              category: ketlinOverride?.category ?? "Salário",
+              owner: ketlinOverride?.owner ?? "Esposa",
+            },
+          });
+        }
       }
       for (const movement of incomeMovements) {
         if (belongsTo(movement.owner, "Leandro")) {
@@ -526,6 +507,7 @@ export function DashboardPage({
           period.bills.flatMap((bill) => {
             const editKey = `period-expense:${period.date}:${bill.id}`;
             const override = entryOverrides[editKey];
+            if (override?.deleted) return [];
             const owner = override?.owner ?? bill.owner;
             if (!belongsTo(owner, person)) return [];
             const toggleKey = billPeriodKey(period.date, bill.id);
@@ -861,7 +843,6 @@ export function DashboardPage({
           month={selectedMonth}
           onClose={() => setSelectedMonthKey(null)}
           onToggleBill={onToggleBill}
-          onDeleteMovement={onDeleteMovement}
           onEdit={setEditingMovement}
         />
       )}
@@ -869,11 +850,32 @@ export function DashboardPage({
         <MovementModal
           initialMovement={editingMovement}
           onClose={() => setEditingMovement(null)}
+          onDelete={() => {
+            const movementId = editingMovement.id;
+            if (movementId.startsWith("period-income:") || movementId.startsWith("period-expense:")) {
+              setEntryOverrides((current) => ({ ...current, [movementId]: { deleted: true } }));
+              setEditingMovement(null);
+              return;
+            }
+            const resolvedMovementId = movementId.startsWith("movement:") ? movementId.replace("movement:", "") : movementId;
+            onDeleteMovement(resolvedMovementId);
+            setEntryOverrides((current) => {
+              const next = { ...current };
+              delete next[movementId];
+              delete next[`movement:${resolvedMovementId}`];
+              return next;
+            });
+            setEditingMovement(null);
+          }}
           onSubmit={(movement) => {
-            setEntryOverrides((current) => ({
-              ...current,
-              [movement.id]: movement,
-            }));
+            setEntryOverrides((current) => {
+              const next = { ...current, [movement.id]: { ...movement, deleted: false } };
+              if (movement.id.startsWith("movement:")) return next;
+              if (current[`movement:${movement.id}`] || movements.some((entry) => entry.id === movement.id)) {
+                next[`movement:${movement.id}`] = { ...movement, deleted: false };
+              }
+              return next;
+            });
             setEditingMovement(null);
           }}
         />
