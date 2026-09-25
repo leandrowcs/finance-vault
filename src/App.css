@@ -243,10 +243,31 @@
 .movement-field select:focus { border-color: #7cae8b; box-shadow: 0 0 0 3px rgba(124, 174, 139, .14); }
 .movement-error { margin: 0; color: #b94f4a; font-size: 10px; }
 .movement-submit { width: 100%; justify-content: center; border-radius: 5px; }
+.movement-form-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+.movement-delete-button {
+  width: auto;
+  min-width: 138px;
+  height: auto;
+  padding: 0 12px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+}
 @media (max-width: 640px) {
   .floating-action-button { right: 16px; bottom: 16px; }
   .movement-modal { padding: 10px; }
   .movement-fields-row { grid-template-columns: 1fr; }
+  .movement-form-actions {
+    grid-template-columns: 1fr;
+  }
+  .movement-delete-button {
+    width: 100%;
+    min-height: 40px;
+  }
 }
 :root {
   --ink: #18312f;
