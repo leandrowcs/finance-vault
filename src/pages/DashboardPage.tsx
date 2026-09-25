@@ -61,6 +61,7 @@ type DashboardPageProps = {
   onToggleBill: (key: string) => void;
   isBillPaid: (key: string) => boolean;
   onDeleteMovement: (movementId: string) => void;
+  onSaveMovement: (movement: Movement) => void;
   onOpenCalendar: () => void;
   onOpenMovement: () => void;
   storageKey?: string;
@@ -256,7 +257,6 @@ function MonthDetailsModal({
                     contas no mês
                   </small>
                 </div>
-                <ReceiptText size={21} />
               </article>
               {month.relatedExpenseCards.map((card) => (
                 <article className="related-income-card" key={card.id}>
@@ -287,7 +287,7 @@ function MonthDetailsModal({
                         {person[0]}
                       </div>
                       <div>
-                        <h3>Despesas de {person}</h3>
+                        <h3>{person}</h3>
                         <span>
                           {currency.format(month.expenseByPerson[person])}{" "}
                           atribuídos
@@ -400,6 +400,7 @@ export function DashboardPage({
   onToggleBill,
   isBillPaid,
   onDeleteMovement,
+  onSaveMovement,
   onOpenCalendar,
   onOpenMovement,
   storageKey = "local",
@@ -894,12 +895,14 @@ export function DashboardPage({
             setEditingMovement(null);
           }}
           onSubmit={(movement) => {
+            const resolvedMovementId = movement.id.startsWith("movement:") ? movement.id.replace("movement:", "") : movement.id;
+            const persistedMovement = { ...movement, id: resolvedMovementId };
+            if (movements.some((entry) => entry.id === resolvedMovementId)) {
+              onSaveMovement(persistedMovement);
+            }
             updateEntryOverrides((current) => {
-              const next = { ...current, [movement.id]: { ...movement, deleted: false } };
-              if (movement.id.startsWith("movement:")) return next;
-              if (current[`movement:${movement.id}`] || movements.some((entry) => entry.id === movement.id)) {
-                next[`movement:${movement.id}`] = { ...movement, deleted: false };
-              }
+              const next = { ...current, [`movement:${resolvedMovementId}`]: { ...persistedMovement, deleted: false } };
+              if (movement.id !== resolvedMovementId) delete next[movement.id];
               return next;
             });
             setEditingMovement(null);
