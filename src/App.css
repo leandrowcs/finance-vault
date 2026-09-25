@@ -224,7 +224,7 @@
   overflow-y: auto;
   padding: 28px;
   border: 1px solid var(--line);
-  border-radius: 10px 0 0 10px;
+  border-radius: 10px;
   background: var(--paper);
   box-shadow: 0 24px 70px rgba(24, 49, 47, .2);
 }
