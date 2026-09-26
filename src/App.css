@@ -736,12 +736,81 @@
   border-radius: 10px;
   background: var(--paper);
 }
+.utility-accordion-group {
+  padding: 0;
+  overflow: hidden;
+}
 .utility-section-heading {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+}
+.utility-accordion-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.utility-accordion-trigger h2 {
+  margin: 0;
+  color: var(--ink);
+  font: 600 18px "Space Grotesk", sans-serif;
+  text-transform: capitalize;
+}
+.utility-accordion-trigger small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.utility-accordion-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.utility-chevron {
+  transition: transform .2s ease;
+}
+.utility-chevron.open {
+  transform: rotate(180deg);
+}
+.utility-accordion-content {
+  padding: 0 18px 18px;
+  border-top: 1px solid #edf0ec;
+}
+.utility-subsection + .utility-subsection {
+  margin-top: 18px;
+}
+.utility-subsection-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.utility-subsection-heading h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+}
+.utility-subsection-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.utility-subsection-heading span {
+  color: var(--muted);
+  font-size: 10px;
 }
 .utility-section-heading h2 {
   margin: 0;
@@ -2329,6 +2398,19 @@
   }
   .utility-section {
     padding: 14px;
+  }
+  .utility-accordion-group {
+    padding: 0;
+  }
+  .utility-accordion-trigger {
+    padding: 14px;
+  }
+  .utility-accordion-content {
+    padding: 0 14px 14px;
+  }
+  .utility-subsection-heading {
+    align-items: flex-start;
+    flex-direction: column;
   }
   .goal-form,
   .goal-grid {

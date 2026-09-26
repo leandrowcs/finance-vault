@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
-import { collection, deleteDoc, doc, onSnapshot, setDoc } from "firebase/firestore";
+import { collection, deleteDoc, doc, onSnapshot, setDoc, updateDoc } from "firebase/firestore";
 import { financePeriods, totalIncome } from "./data/financeSeed";
 import { AppNavigation, type NavigationView } from "./components/AppNavigation";
 import { AppTopbar } from "./components/AppTopbar";
@@ -46,6 +46,20 @@ function deletedMovementsStorageKey(user: User | null) {
   return user ? `financevault:deleted-movements:${user.uid}` : "financevault:deleted-movements";
 }
 
+function entryOverridesStorageKey(user: User | null) {
+  return `financevault:entry-overrides:${user?.uid ?? "local"}`;
+}
+
+function normalizeEntryOverrides(overrides: EntryOverrides) {
+  return Object.entries(overrides).reduce<EntryOverrides>((normalized, [key, value]) => {
+    const normalizedKey = key.startsWith("movement:period-income:") || key.startsWith("movement:period-expense:")
+      ? key.replace("movement:", "")
+      : key;
+    normalized[normalizedKey] = value;
+    return normalized;
+  }, {});
+}
+
 function sharedStateRef(user: User) {
   return doc(db!, "users", user.uid, "settings", "shared");
 }
@@ -74,6 +88,15 @@ function readDeletedMovementIds(user: User | null) {
     return stored ? new Set(JSON.parse(stored) as string[]) : new Set<string>();
   } catch {
     return new Set<string>();
+  }
+}
+
+function readStoredEntryOverrides(user: User | null) {
+  try {
+    const stored = localStorage.getItem(entryOverridesStorageKey(user));
+    return stored ? normalizeEntryOverrides(JSON.parse(stored) as EntryOverrides) : {};
+  } catch {
+    return {};
   }
 }
 
@@ -130,7 +153,9 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   }, []);
   useEffect(() => {
     setMovementsLoaded(false);
-    setEntryOverrides(undefined);
+    const storedEntryOverrides = readStoredEntryOverrides(user);
+    setEntryOverrides(storedEntryOverrides);
+    localStorage.setItem(entryOverridesStorageKey(user), JSON.stringify(storedEntryOverrides));
     const storedMovements = readStoredMovements(user);
     setMovements(storedMovements);
     if (user && db) {
@@ -153,9 +178,19 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
           setBillPaidState((current) => ({ ...current, ...sharedState.billPaidState }));
           localStorage.setItem(billsStorageKey(user), JSON.stringify(sharedState.billPaidState));
         }
-        const nextEntryOverrides = sharedState?.entryOverrides ?? {};
-        setEntryOverrides(nextEntryOverrides);
-        localStorage.setItem(`financevault:entry-overrides:${user.uid}`, JSON.stringify(nextEntryOverrides));
+        if (sharedState?.entryOverrides !== undefined) {
+          const nextEntryOverrides = normalizeEntryOverrides(sharedState.entryOverrides);
+          setEntryOverrides(nextEntryOverrides);
+          localStorage.setItem(entryOverridesStorageKey(user), JSON.stringify(nextEntryOverrides));
+          if (JSON.stringify(nextEntryOverrides) !== JSON.stringify(sharedState.entryOverrides)) {
+            void updateDoc(sharedStateRef(user), { entryOverrides: nextEntryOverrides }).catch(() =>
+              setDoc(sharedStateRef(user), { entryOverrides: nextEntryOverrides }, { merge: true }),
+            );
+          }
+        } else if (snapshot.exists()) {
+          setEntryOverrides({});
+          localStorage.setItem(entryOverridesStorageKey(user), JSON.stringify({}));
+        }
       });
       return () => {
         unsubscribeMovements();
@@ -187,10 +222,15 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     }
   };
   const saveEntryOverrides = async (nextEntryOverrides: EntryOverrides) => {
-    setEntryOverrides(nextEntryOverrides);
-    localStorage.setItem(`financevault:entry-overrides:${user?.uid ?? "local"}`, JSON.stringify(nextEntryOverrides));
+    const normalizedEntryOverrides = normalizeEntryOverrides(nextEntryOverrides);
+    setEntryOverrides(normalizedEntryOverrides);
+    localStorage.setItem(entryOverridesStorageKey(user), JSON.stringify(normalizedEntryOverrides));
     if (user && db) {
-      try { await setDoc(sharedStateRef(user), { entryOverrides: nextEntryOverrides }, { merge: true }); } catch { return; }
+      try {
+        await updateDoc(sharedStateRef(user), { entryOverrides: normalizedEntryOverrides });
+      } catch {
+        try { await setDoc(sharedStateRef(user), { entryOverrides: normalizedEntryOverrides }, { merge: true }); } catch { return; }
+      }
     }
   };
   const calendarItems = useMemo(() => {
@@ -216,7 +256,7 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   });
   const isBillPaid = (key: string) => Boolean(billPaidState[key]);
   const handleSignOut = async () => { if (!onSignOut) return; setIsSigningOut(true); setSignOutError(""); try { await onSignOut(); } catch { setSignOutError("Não foi possível sair agora."); setIsSigningOut(false); } };
-  const planningPageProps = { movements, user, displayName, initials, storageKey: user?.uid ?? "local", onSignOut: onSignOut ? () => void handleSignOut() : undefined, onToggleBill: toggleBill, isBillPaid };
+  const planningPageProps = { movements, user, displayName, initials, storageKey: user?.uid ?? "local", onSignOut: onSignOut ? () => void handleSignOut() : undefined, onToggleBill: toggleBill, isBillPaid, sharedEntryOverrides: entryOverrides };
   const pageContent = activeView === "payments" ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} /> : activeView === "dashboard" ? <DashboardPage movements={movements} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onSaveMovement={(movement) => { void saveMovement(movement); }} sharedEntryOverrides={entryOverrides} onEntryOverridesChange={(overrides) => { void saveEntryOverrides(overrides); }} onOpenCalendar={() => changeView("payments")} onOpenMovement={() => setIsMovementModalOpen(true)} storageKey={user?.uid ?? "local"} /> : activeView === "bills" ? <BillsPage {...planningPageProps} /> : activeView === "income" ? <IncomePage {...planningPageProps} /> : activeView === "goals" ? <GoalsPage {...planningPageProps} /> : activeView === "members" ? <MembersPage {...planningPageProps} /> : <SettingsPage {...planningPageProps} />;
 
   if (!movementsLoaded) return null;
