@@ -8,6 +8,8 @@ const todayDate = new Date();
 const today = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`;
 const expenseCategories = ["Casa", "Transporte", "Alimentação", "Assinaturas", "Família", "Pets", "Outros"];
 const incomeCategories = ["Salário", "Freelance", "Investimentos", "Reembolso", "Outros"];
+const expenseOwners: FormState["owner"][] = ["Você", "Esposa", "Compartilhado"];
+const incomeOwners: FormState["owner"][] = ["Você", "Esposa"];
 const initialForm: FormState = { amount: 0, date: today, type: "expense", description: "", category: expenseCategories[0], owner: "Você", recurrence: "none", recurrenceCount: 1 };
 
 type MovementModalProps = {
@@ -25,7 +27,8 @@ export function MovementModal({ onClose, onSubmit, initialMovement, onDelete }: 
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((current) => ({ ...current, [key]: value }));
   const updateType = (type: Movement["type"]) => setForm((current) => {
     const nextCategories = type === "income" ? incomeCategories : expenseCategories;
-    return { ...current, type, category: nextCategories.includes(current.category) ? current.category : nextCategories[0] };
+    const nextOwner = type === "income" && current.owner === "Compartilhado" ? "Você" : current.owner;
+    return { ...current, type, owner: nextOwner, category: nextCategories.includes(current.category) ? current.category : nextCategories[0] };
   });
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -33,6 +36,7 @@ export function MovementModal({ onClose, onSubmit, initialMovement, onDelete }: 
     if (!Number.isInteger(form.recurrenceCount) || Number(form.recurrenceCount) < 1 || Number(form.recurrenceCount) > 120) { setError("Informe entre 1 e 120 ocorrências."); return; }
     onSubmit({ ...form, id: initialMovement?.id ?? crypto.randomUUID(), description: form.description.trim(), amount: Number(form.amount), recurrence: form.recurrence ?? "none", recurrenceCount: Number(form.recurrenceCount) });
   };
+  const ownerOptions = form.type === "income" ? incomeOwners : expenseOwners;
 
   return (
     <div className="movement-modal-layer">
@@ -56,7 +60,17 @@ export function MovementModal({ onClose, onSubmit, initialMovement, onDelete }: 
             {form.recurrence !== "none" && <label className="movement-field"><span>Quantidade</span><input type="number" min="1" max="120" step="1" value={form.recurrenceCount || ""} onChange={(event) => update("recurrenceCount", Number(event.target.value))} disabled={isEditing} required /></label>}
           </div>
           <label className="movement-field"><span>Descrição</span><input value={form.description} onChange={(event) => update("description", event.target.value)} placeholder="Ex.: Mercado" /></label>
-          <label className="movement-field"><span>{form.type === "income" ? "Quem recebe" : "Quem paga"}</span><select value={form.owner} onChange={(event) => update("owner", event.target.value as FormState["owner"])}><option value="Você">Você</option><option value="Esposa">Esposa</option><option value="Compartilhado">Compartilhado</option></select></label>
+          <div className="movement-field">
+            <span>{form.type === "income" ? "Quem recebe" : "Quem paga"}</span>
+            <div className="movement-owner-toggle" role="radiogroup" aria-label={form.type === "income" ? "Quem recebe" : "Quem paga"}>
+              {ownerOptions.map((owner) => (
+                <label className={form.owner === owner ? "selected" : ""} key={owner}>
+                  <input type="radio" name="owner" value={owner} checked={form.owner === owner} onChange={() => update("owner", owner)} />
+                  {owner}
+                </label>
+              ))}
+            </div>
+          </div>
           {error && <p className="movement-error">{error}</p>}
           <div className={onDelete && isEditing ? "movement-form-actions" : ""}><button className="solid-button movement-submit" type="submit">{isEditing ? "Salvar alterações" : "Adicionar movimento"}</button>{onDelete && isEditing && <button className="entry-delete-button movement-delete-button" type="button" onClick={onDelete}>Excluir lançamento</button>}</div>
         </form>

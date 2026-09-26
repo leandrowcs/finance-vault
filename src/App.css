@@ -312,6 +312,32 @@
   border-color: #7cae8b;
   box-shadow: 0 0 0 3px rgba(124, 174, 139, 0.14);
 }
+.movement-owner-toggle {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.movement-owner-toggle label {
+  min-height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0 8px;
+  border: 1px solid #d8e0d9;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.movement-owner-toggle label.selected {
+  border-color: #7cae8b;
+  color: #397153;
+  background: #edf7ed;
+}
+.movement-owner-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
 .movement-error {
   margin: 0;
   color: #b94f4a;
@@ -1660,6 +1686,21 @@
   gap: 10px;
   margin-bottom: 10px;
 }
+.section-collapse-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+.section-collapse-trigger .eyebrow {
+  margin-bottom: 3px;
+}
 .section-heading h2 {
   margin: 0;
   color: var(--ink);
@@ -1841,6 +1882,9 @@
   gap: 10px;
   margin-bottom: 10px;
 }
+.expense-summary-grid.details-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
 .expense-total-card {
   color: var(--ink);
   background: #f8e6d8;
@@ -1876,6 +1920,59 @@
 }
 .expense-column {
   background: #fbfcf9;
+}
+.balance-total-card {
+  color: var(--ink);
+  background: #e7f2f8;
+  border-color: #d3e5f2;
+}
+.balance-total-card span,
+.balance-total-card small {
+  color: #5e8292;
+}
+.payment-balance-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.payment-balance-card {
+  padding: 10px;
+  border: 1px solid #dce8df;
+  border-radius: 10px;
+  background: #f6faf8;
+}
+.payment-balance-card header {
+  margin-bottom: 8px;
+}
+.payment-balance-card header strong {
+  display: block;
+  color: var(--ink);
+  font:
+    600 14px "Space Grotesk",
+    sans-serif;
+}
+.payment-balance-card header small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.payment-balance-card p {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 10px;
+}
+.payment-balance-card p + p {
+  margin-top: 4px;
+}
+.payment-balance-card p strong {
+  color: var(--ink);
 }
 .expense-card-main {
   display: flex;
@@ -2007,6 +2104,9 @@
   .goal-grid {
     grid-template-columns: 1fr;
   }
+  .movement-owner-toggle {
+    grid-template-columns: 1fr;
+  }
   .goal-form .solid-button {
     justify-content: center;
   }
@@ -2043,8 +2143,14 @@
   .expense-summary-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+  .expense-summary-grid.details-grid {
+    grid-template-columns: 1fr;
+  }
   .month-total-card {
     min-height: 90px;
+  }
+  .payment-balance-grid {
+    grid-template-columns: 1fr;
   }
   .month-details-modal-header,
   .month-details-modal-content {

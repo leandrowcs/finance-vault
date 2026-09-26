@@ -35,6 +35,14 @@ type IncomeEntry = {
 };
 type EntryOverride = Partial<Movement> & { deleted?: boolean };
 type EntryOverrides = Record<string, EntryOverride>;
+type PaymentBalance = {
+  id: string;
+  label: string;
+  date: string;
+  income: number;
+  expense: number;
+  balance: number;
+};
 type MonthSummary = {
   key: string;
   label: string;
@@ -53,6 +61,7 @@ type MonthSummary = {
     date: string;
     isMovement?: boolean;
   }[];
+  paymentBalances: PaymentBalance[];
 };
 type DashboardPageProps = {
   movements: Movement[];
@@ -137,6 +146,11 @@ function MonthDetailsModal({
 }) {
   const hasIncome = month.incomeTotal > 0;
   const hasExpenses = month.expenseTotal > 0;
+  const [expandedSections, setExpandedSections] = useState({
+    income: false,
+    expenses: false,
+    balance: false,
+  });
 
   return (
     <div className="movement-modal-layer">
@@ -167,9 +181,24 @@ function MonthDetailsModal({
         <div className="month-details-modal-content">
           <section className="month-section" aria-labelledby="income-title">
             <div className="section-heading">
-              <div>
+              <button
+                className="section-collapse-trigger"
+                type="button"
+                aria-expanded={expandedSections.income}
+                onClick={() =>
+                  setExpandedSections((current) => ({
+                    ...current,
+                    income: !current.income,
+                  }))
+                }
+              >
                 <h2 id="income-title">Receitas do mês</h2>
-              </div>
+                {expandedSections.income ? (
+                  <ChevronUp size={16} />
+                ) : (
+                  <ChevronDown size={16} />
+                )}
+              </button>
               <span className="section-caption">
                 {month.incomeEntriesByPerson.Leandro.length +
                   month.incomeEntriesByPerson.Ketlin.length}{" "}
@@ -186,6 +215,7 @@ function MonthDetailsModal({
                 <ArrowUpRight size={21} />
               </div>
             </article>
+            {expandedSections.income && (
             <div className="person-grid">
               {people.map((person) => (
                 <section className="person-column" key={person}>
@@ -235,19 +265,35 @@ function MonthDetailsModal({
                 </section>
               ))}
             </div>
+            )}
           </section>
           <section
             className="month-section expenses-section"
             aria-labelledby="expenses-title"
           >
             <div className="section-heading">
-              <div>
-                <p className="eyebrow">COMPROMISSOS FINANCEIROS</p>
-                <h2 id="expenses-title">Despesas do mês</h2>
-              </div>
+            <button
+              className="section-collapse-trigger"
+              type="button"
+              aria-expanded={expandedSections.expenses}
+              onClick={() =>
+                setExpandedSections((current) => ({
+                  ...current,
+                  expenses: !current.expenses,
+                }))
+              }
+            >
+              <p className="eyebrow">COMPROMISSOS FINANCEIROS</p>
+              <h2 id="expenses-title">Despesas do mês</h2>
+              {expandedSections.expenses ? (
+                <ChevronUp size={16} />
+              ) : (
+                <ChevronDown size={16} />
+              )}
+            </button>
             </div>
             <div className="expense-summary-grid">
-              <article className="month-total-card expense-total-card">
+            <article className="month-total-card expense-total-card">
                 <div>
                   <span>Total das despesas</span>
                   <strong>{currency.format(month.expenseTotal)}</strong>
@@ -260,137 +306,208 @@ function MonthDetailsModal({
                   </small>
                 </div>
               </article>
-              {month.relatedExpenseCards.map((card) => (
-                <article className="related-income-card" key={card.id}>
-                  <span>
-                    {card.isMovement
-                      ? "Despesa registrada"
-                      : "Despesas da receita"}
-                  </span>
-                  <strong>{currency.format(card.amount)}</strong>
-                  <small>
-                    <CalendarDays size={13} />
-                    {card.label}
-                  </small>
-                </article>
-              ))}
             </div>
-            {!hasExpenses ? (
-              <div className="empty-state wide">Nenhuma despesa neste mês.</div>
-            ) : (
-              <div className="person-grid expense-columns">
-                {month.billsByPerson.map(({ person, bills }) => (
-                  <section
-                    className="person-column expense-column"
-                    key={person}
-                  >
-                    <div className="column-heading">
-                      <div className={`person-avatar ${person.toLowerCase()}`}>
-                        {person[0]}
-                      </div>
-                      <div>
-                        <h3>{person}</h3>
+            {expandedSections.expenses &&
+              (!hasExpenses ? (
+                <div className="empty-state wide">Nenhuma despesa neste mês.</div>
+              ) : (
+                <>
+                  <div className="expense-summary-grid details-grid">
+                    {month.relatedExpenseCards.map((card) => (
+                      <article className="related-income-card" key={card.id}>
                         <span>
-                          {currency.format(month.expenseByPerson[person])}{" "}
-                          atribuídos
+                          {card.isMovement
+                            ? "Despesa registrada"
+                            : "Despesas da receita"}
                         </span>
-                      </div>
-                    </div>
-                    {bills.map(
-                      ({
-                        bill,
-                        incomeLabel,
-                        expenseDate,
-                        toggleKey,
-                        editKey,
-                      }) => (
-                        <article
-                          className="expense-card"
-                          key={`${person}-${toggleKey}`}
-                        >
-                          <div className="expense-card-main">
-                            <div className="expense-category">
-                              <ReceiptText size={15} />
-                              <div>
-                                <strong>{bill.name}</strong>
-                                <span>
-                                  {bill.category}
-                                  {bill.owner === "Compartilhado" &&
-                                    " · Compartilhada"}
-                                </span>
-                              </div>
-                            </div>
-                            <strong
-                              className={
-                                bill.paid
-                                  ? "expense-amount paid-amount"
-                                  : "expense-amount"
-                              }
+                        <strong>{currency.format(card.amount)}</strong>
+                        <small>
+                          <CalendarDays size={13} />
+                          {card.label}
+                        </small>
+                      </article>
+                    ))}
+                  </div>
+                  <div className="person-grid expense-columns">
+                    {month.billsByPerson.map(({ person, bills }) => (
+                      <section
+                        className="person-column expense-column"
+                        key={person}
+                      >
+                        <div className="column-heading">
+                          <div className={`person-avatar ${person.toLowerCase()}`}>
+                            {person[0]}
+                          </div>
+                          <div>
+                            <h3>{person}</h3>
+                            <span>
+                              {currency.format(month.expenseByPerson[person])}{" "}
+                              atribuídos
+                            </span>
+                          </div>
+                        </div>
+                        {bills.map(
+                          ({
+                            bill,
+                            incomeLabel,
+                            expenseDate,
+                            toggleKey,
+                            editKey,
+                          }) => (
+                            <article
+                              className="expense-card"
+                              key={`${person}-${toggleKey}`}
                             >
-                              {currency.format(
-                                allocatedAmount(bill.amount, bill.owner),
-                              )}
-                            </strong>
-                          </div>
-                          <div className="expense-card-meta">
-                            <div className="expense-card-meta-info">
-                              <span>
-                                <CalendarDays size={13} />
-                                Vence em {dateFormatter.format(expenseDate)}
-                              </span>
-                              <span>
-                                <ArrowUpRight size={13} />
-                                Receita: {incomeLabel}
-                              </span>
-                            </div>
-                            <div className="expense-card-actions">
-                              <button
-                                className="entry-edit-button"
-                                type="button"
-                                aria-label={`Editar despesa ${bill.name}`}
-                                onClick={() =>
-                                  onEdit({
-                                    id: editKey,
-                                    type: "expense",
-                                    amount: bill.amount,
-                                    date: `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, "0")}-${String(expenseDate.getDate()).padStart(2, "0")}`,
-                                    description: bill.name,
-                                    category: bill.category,
-                                    owner: bill.owner,
-                                  })
-                                }
-                              >
-                                <Pencil size={14} />
-                              </button>
-                              <button
-                                className={
-                                  bill.paid
-                                    ? "check-control checked"
-                                    : "check-control"
-                                }
-                                type="button"
-                                aria-label={
-                                  bill.paid
-                                    ? `Desmarcar ${bill.name}`
-                                    : `Marcar ${bill.name} como paga`
-                                }
-                                onClick={() => onToggleBill(toggleKey)}
-                              >
-                                {bill.paid ? (
-                                  <CircleCheck size={18} />
-                                ) : (
-                                  <Circle size={18} />
-                                )}
-                              </button>
-                            </div>
-                          </div>
-                        </article>
-                      ),
-                    )}
-                  </section>
-                ))}
+                              <div className="expense-card-main">
+                                <div className="expense-category">
+                                  <ReceiptText size={15} />
+                                  <div>
+                                    <strong>{bill.name}</strong>
+                                    <span>
+                                      {bill.category}
+                                      {bill.owner === "Compartilhado" &&
+                                        " · Compartilhada"}
+                                    </span>
+                                  </div>
+                                </div>
+                                <strong
+                                  className={
+                                    bill.paid
+                                      ? "expense-amount paid-amount"
+                                      : "expense-amount"
+                                  }
+                                >
+                                  {currency.format(
+                                    allocatedAmount(bill.amount, bill.owner),
+                                  )}
+                                </strong>
+                              </div>
+                              <div className="expense-card-meta">
+                                <div className="expense-card-meta-info">
+                                  <span>
+                                    <CalendarDays size={13} />
+                                    Vence em {dateFormatter.format(expenseDate)}
+                                  </span>
+                                  <span>
+                                    <ArrowUpRight size={13} />
+                                    Receita: {incomeLabel}
+                                  </span>
+                                </div>
+                                <div className="expense-card-actions">
+                                  <button
+                                    className="entry-edit-button"
+                                    type="button"
+                                    aria-label={`Editar despesa ${bill.name}`}
+                                    onClick={() =>
+                                      onEdit({
+                                        id: editKey,
+                                        type: "expense",
+                                        amount: bill.amount,
+                                        date: `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, "0")}-${String(expenseDate.getDate()).padStart(2, "0")}`,
+                                        description: bill.name,
+                                        category: bill.category,
+                                        owner: bill.owner,
+                                      })
+                                    }
+                                  >
+                                    <Pencil size={14} />
+                                  </button>
+                                  <button
+                                    className={
+                                      bill.paid
+                                        ? "check-control checked"
+                                        : "check-control"
+                                    }
+                                    type="button"
+                                    aria-label={
+                                      bill.paid
+                                        ? `Desmarcar ${bill.name}`
+                                        : `Marcar ${bill.name} como paga`
+                                    }
+                                    onClick={() => onToggleBill(toggleKey)}
+                                  >
+                                    {bill.paid ? (
+                                      <CircleCheck size={18} />
+                                    ) : (
+                                      <Circle size={18} />
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                            </article>
+                          ),
+                        )}
+                      </section>
+                    ))}
+                  </div>
+                </>
+              ))}
+          </section>
+          <section className="month-section expenses-section" aria-labelledby="balance-title">
+            <div className="section-heading">
+              <button
+                className="section-collapse-trigger"
+                type="button"
+                aria-expanded={expandedSections.balance}
+                onClick={() =>
+                  setExpandedSections((current) => ({
+                    ...current,
+                    balance: !current.balance,
+                  }))
+                }
+              >
+                <h2 id="balance-title">Saldo do mês</h2>
+                {expandedSections.balance ? (
+                  <ChevronUp size={16} />
+                ) : (
+                  <ChevronDown size={16} />
+                )}
+              </button>
+              <span className="section-caption">
+                {month.paymentBalances.length} pagamentos
+              </span>
+            </div>
+            <article className="month-total-card balance-total-card">
+              <div>
+                <span>Saldo total</span>
+                <strong className={month.balance >= 0 ? "positive" : "negative"}>
+                  {currency.format(month.balance)}
+                </strong>
+                <small>Receitas menos despesas</small>
               </div>
-            )}
+            </article>
+            {expandedSections.balance &&
+              (month.paymentBalances.length === 0 ? (
+                <div className="empty-state wide">Nenhum saldo por pagamento neste mês.</div>
+              ) : (
+                <div className="payment-balance-grid">
+                  {month.paymentBalances.map((payment) => (
+                    <article className="payment-balance-card" key={payment.id}>
+                      <header>
+                        <strong>{payment.label}</strong>
+                        <small>
+                          <CalendarDays size={13} />
+                          {dateFormatter.format(new Date(`${payment.date}T12:00:00`))}
+                        </small>
+                      </header>
+                      <p>
+                        <span>Receitas</span>
+                        <strong>{currency.format(payment.income)}</strong>
+                      </p>
+                      <p>
+                        <span>Despesas</span>
+                        <strong>{currency.format(payment.expense)}</strong>
+                      </p>
+                      <p>
+                        <span>Saldo</span>
+                        <strong className={payment.balance >= 0 ? "positive" : "negative"}>
+                          {currency.format(payment.balance)}
+                        </strong>
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              ))}
           </section>
         </div>
       </section>
@@ -632,6 +749,44 @@ export function DashboardPage({
           date: relatedExpense.date,
         }),
       );
+      const paymentBalancesByLabel = new Map<
+        string,
+        { income: number; expense: number; date: string }
+      >();
+      people.forEach((person) => {
+        incomeEntriesByPerson[person].forEach((entry) => {
+          const paymentDate = new Date(`${entry.date}T12:00:00`);
+          const paymentLabel = cgiPaymentLabel(paymentDate);
+          const current = paymentBalancesByLabel.get(paymentLabel);
+          paymentBalancesByLabel.set(paymentLabel, {
+            income: (current?.income ?? 0) + entry.amount,
+            expense: current?.expense ?? 0,
+            date: current?.date ?? dateKey(paymentDate),
+          });
+        });
+      });
+      billsByPerson.forEach(({ bills }) => {
+        bills.forEach(({ bill, incomeLabel, expenseDate }) => {
+          const current = paymentBalancesByLabel.get(incomeLabel);
+          paymentBalancesByLabel.set(incomeLabel, {
+            income: current?.income ?? 0,
+            expense:
+              (current?.expense ?? 0) +
+              allocatedAmount(bill.amount, bill.owner),
+            date: current?.date ?? dateKey(expenseDate),
+          });
+        });
+      });
+      const paymentBalances: PaymentBalance[] = [...paymentBalancesByLabel.entries()]
+        .map(([paymentLabel, values]) => ({
+          id: `${key}-${paymentLabel}`,
+          label: paymentLabel,
+          date: values.date,
+          income: values.income,
+          expense: values.expense,
+          balance: values.income - values.expense,
+        }))
+        .sort((left, right) => left.date.localeCompare(right.date));
 
       return {
         key,
@@ -645,6 +800,7 @@ export function DashboardPage({
         incomeEntriesByPerson,
         billsByPerson,
         relatedExpenseCards,
+        paymentBalances,
       };
     });
   }, [currentYear, movements, isBillPaid, entryOverrides]);
