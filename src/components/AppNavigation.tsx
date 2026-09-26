@@ -70,11 +70,11 @@ export function AppNavigation({
             }}
           >
             <CalendarDays size={17} />
-            Pagamentos<span className="nav-count">26</span>
+            Calendário
           </button>
           <button className={`nav-link${activeView === "bills" ? " active" : ""}`} type="button" onClick={() => { onNavigate("bills"); onClose(); }}>
             <ReceiptText size={17} />
-            Contas<span className="nav-count">12</span>
+            Contas
           </button>
           <span className="nav-label spaced">Planejamento</span>
           <button className={`nav-link${activeView === "income" ? " active" : ""}`} type="button" onClick={() => { onNavigate("income"); onClose(); }}>
