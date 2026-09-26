@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { financePeriods, type SeedPayPeriod } from "../data/financeSeed";
 import { FloatingActionButton } from "../components/FloatingActionButton";
 import { MovementModal } from "../components/MovementModal";
-import { cgiPaymentLabel, currency, dateKey, dueDate, monthLabels } from "../lib/finance";
+import { cgiPaymentDate, cgiPaymentLabel, currency, dateKey, dueDate, monthLabels } from "../lib/finance";
 import type { Bill, Movement } from "../types/finance";
 
 type Person = "Leandro" | "Ketlin";
@@ -756,24 +756,26 @@ export function DashboardPage({
       people.forEach((person) => {
         incomeEntriesByPerson[person].forEach((entry) => {
           const paymentDate = new Date(`${entry.date}T12:00:00`);
-          const paymentLabel = cgiPaymentLabel(paymentDate);
+          const normalizedPaymentDate = cgiPaymentDate(paymentDate);
+          const paymentLabel = cgiPaymentLabel(normalizedPaymentDate);
           const current = paymentBalancesByLabel.get(paymentLabel);
           paymentBalancesByLabel.set(paymentLabel, {
             income: (current?.income ?? 0) + entry.amount,
             expense: current?.expense ?? 0,
-            date: current?.date ?? dateKey(paymentDate),
+            date: current?.date ?? dateKey(normalizedPaymentDate),
           });
         });
       });
       billsByPerson.forEach(({ bills }) => {
         bills.forEach(({ bill, incomeLabel, expenseDate }) => {
           const current = paymentBalancesByLabel.get(incomeLabel);
+          const normalizedPaymentDate = cgiPaymentDate(expenseDate);
           paymentBalancesByLabel.set(incomeLabel, {
             income: current?.income ?? 0,
             expense:
               (current?.expense ?? 0) +
               allocatedAmount(bill.amount, bill.owner),
-            date: current?.date ?? dateKey(expenseDate),
+            date: current?.date ?? dateKey(normalizedPaymentDate),
           });
         });
       });
