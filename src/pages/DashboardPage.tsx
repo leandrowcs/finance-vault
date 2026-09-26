@@ -1067,13 +1067,16 @@ export function DashboardPage({
           }}
           onSubmit={(movement) => {
             const resolvedMovementId = movement.id.startsWith("movement:") ? movement.id.replace("movement:", "") : movement.id;
+            const overrideKey = movement.id.startsWith("period-income:") || movement.id.startsWith("period-expense:")
+              ? movement.id
+              : `movement:${resolvedMovementId}`;
             const persistedMovement = { ...movement, id: resolvedMovementId };
             if (movements.some((entry) => entry.id === resolvedMovementId)) {
               onSaveMovement(persistedMovement);
             }
             updateEntryOverrides((current) => {
-              const next = { ...current, [`movement:${resolvedMovementId}`]: { ...persistedMovement, deleted: false } };
-              if (movement.id !== resolvedMovementId) delete next[movement.id];
+              const next = { ...current, [overrideKey]: { ...persistedMovement, deleted: false } };
+              if (movement.id !== resolvedMovementId && overrideKey !== movement.id) delete next[movement.id];
               return next;
             });
             setEditingMovement(null);

@@ -44,7 +44,7 @@ type IncomeListItem = {
   date: string;
   dateLabel: string;
 };
-type MonthlyGroup<T extends { id: string; amount: number; date: string; kind: ItemKind }> = {
+type MonthlyGroup<T extends { id: string; amount: number; date: string; kind: ItemKind; title: string }> = {
   key: string;
   label: string;
   items: T[];
@@ -95,7 +95,7 @@ function sortItems<T extends { date: string; kind: ItemKind; title: string }>(it
   );
 }
 
-function groupItemsByMonth<T extends { id: string; amount: number; date: string; kind: ItemKind }>(items: T[]) {
+function groupItemsByMonth<T extends { id: string; amount: number; date: string; kind: ItemKind; title: string }>(items: T[]) {
   const groups = new Map<string, MonthlyGroup<T>>();
   sortItems(items).forEach((item) => {
     const date = itemDate(item.date);
@@ -135,7 +135,7 @@ function useExpandedMonth(groups: { key: string }[]) {
   return { expandedKey, setExpandedKey };
 }
 
-function MonthAccordion<T extends { id: string; amount: number; date: string; kind: ItemKind }>({
+function MonthAccordion<T extends { id: string; amount: number; date: string; kind: ItemKind; title: string }>({
   group,
   isOpen,
   onToggle,
@@ -262,7 +262,6 @@ export function BillsPage({ movements, onToggleBill, isBillPaid, sharedEntryOver
       }),
     );
     const manualItems: BillListItem[] = movements
-    const manualItems: BillListItem[] = movements
       .map((movement) => ({
         ...movement,
         ...sharedEntryOverrides[`movement:${movement.id}`],
@@ -333,34 +332,35 @@ export function IncomePage({ movements, sharedEntryOverrides = {} }: PlanningPag
     const plannedItems: IncomeListItem[] = financePeriods.flatMap((period) => {
       const leandroOverride = sharedEntryOverrides[`period-income:${period.date}:leandro`];
       const ketlinOverride = sharedEntryOverrides[`period-income:${period.date}:ketlin`];
-      return [
-        !leandroOverride?.deleted
-          ? {
-              id: `period-income:${period.date}:leandro`,
-              kind: "planned" as const,
-              title: leandroOverride?.description ?? "Pagamento planejado · Você",
-              amount: leandroOverride?.amount ?? period.income.leandro,
-              category: leandroOverride?.category ?? "Salário",
-              owner: leandroOverride?.owner ?? "Você",
-              date: leandroOverride?.date ?? period.date,
-              dateLabel: formatDate(leandroOverride?.date ?? period.date),
-            }
-          : null,
-        !ketlinOverride?.deleted
-          ? {
-              id: `period-income:${period.date}:ketlin`,
-              kind: "planned" as const,
-              title: ketlinOverride?.description ?? "Pagamento planejado · Esposa",
-              amount: ketlinOverride?.amount ?? period.income.ketlin,
-              category: ketlinOverride?.category ?? "Salário",
-              owner: ketlinOverride?.owner ?? "Esposa",
-              date: ketlinOverride?.date ?? period.date,
-              dateLabel: formatDate(ketlinOverride?.date ?? period.date),
-            }
-          : null,
-      ].filter((item): item is IncomeListItem => Boolean(item));
+      const items: IncomeListItem[] = [];
+      if (!leandroOverride?.deleted) {
+        const date = leandroOverride?.date ?? period.date;
+        items.push({
+          id: `period-income:${period.date}:leandro`,
+          kind: "planned",
+          title: leandroOverride?.description ?? "Pagamento planejado · Você",
+          amount: leandroOverride?.amount ?? period.income.leandro,
+          category: leandroOverride?.category ?? "Salário",
+          owner: leandroOverride?.owner ?? "Você",
+          date,
+          dateLabel: formatDate(date),
+        });
+      }
+      if (!ketlinOverride?.deleted) {
+        const date = ketlinOverride?.date ?? period.date;
+        items.push({
+          id: `period-income:${period.date}:ketlin`,
+          kind: "planned",
+          title: ketlinOverride?.description ?? "Pagamento planejado · Esposa",
+          amount: ketlinOverride?.amount ?? period.income.ketlin,
+          category: ketlinOverride?.category ?? "Salário",
+          owner: ketlinOverride?.owner ?? "Esposa",
+          date,
+          dateLabel: formatDate(date),
+        });
+      }
+      return items;
     });
-    const manualItems: IncomeListItem[] = movements
     const manualItems: IncomeListItem[] = movements
       .map((movement) => ({
         ...movement,
