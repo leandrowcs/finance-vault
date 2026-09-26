@@ -179,10 +179,10 @@ function MonthDetailsModal({
           <h2 id="month-details-title">{month.label}</h2>
         </header>
         <div className="month-details-modal-content">
-          <section className="month-section" aria-labelledby="income-title">
-            <div className="section-heading">
+          <section className="month-section month-details-section" aria-labelledby="income-title">
+            <div className="section-heading month-details-section-heading">
               <button
-                className="section-collapse-trigger"
+                className="section-collapse-trigger month-details-collapse-trigger"
                 type="button"
                 aria-expanded={expandedSections.income}
                 onClick={() =>
@@ -199,13 +199,13 @@ function MonthDetailsModal({
                   <ChevronDown size={16} />
                 )}
               </button>
-              <span className="section-caption">
+              <span className="section-caption month-details-section-caption">
                 {month.incomeEntriesByPerson.Leandro.length +
                   month.incomeEntriesByPerson.Ketlin.length}{" "}
                 registros
               </span>
             </div>
-            <article className="month-total-card income-total-card">
+            <article className="month-details-total-card month-details-income-total-card">
               <div>
                 <span>Total acumulado</span>
                 <strong>{currency.format(month.incomeTotal)}</strong>
@@ -216,9 +216,9 @@ function MonthDetailsModal({
               </div>
             </article>
             {expandedSections.income && (
-            <div className="person-grid">
+            <div className="month-details-person-grid">
               {people.map((person) => (
-                <section className="person-column" key={person}>
+                <section className="month-details-person-column" key={person}>
                   <div className="column-heading">
                     <div className={`person-avatar ${person.toLowerCase()}`}>
                       {person[0]}
@@ -238,7 +238,7 @@ function MonthDetailsModal({
                   ) : (
                     month.incomeEntriesByPerson[person].map((income) => (
                       <article
-                        className="income-card"
+                        className="month-details-income-card"
                         key={`${person}-${income.id}`}
                       >
                         <div>
@@ -268,12 +268,12 @@ function MonthDetailsModal({
             )}
           </section>
           <section
-            className="month-section expenses-section"
+            className="month-section month-details-section month-details-expenses-section"
             aria-labelledby="expenses-title"
           >
-            <div className="section-heading">
+            <div className="section-heading month-details-section-heading">
             <button
-              className="section-collapse-trigger"
+              className="section-collapse-trigger month-details-collapse-trigger"
               type="button"
               aria-expanded={expandedSections.expenses}
               onClick={() =>
@@ -292,8 +292,8 @@ function MonthDetailsModal({
               )}
             </button>
             </div>
-            <div className="expense-summary-grid">
-            <article className="month-total-card expense-total-card">
+            <div className="month-details-expense-summary">
+            <article className="month-details-total-card month-details-expense-total-card">
                 <div>
                   <span>Total das despesas</span>
                   <strong>{currency.format(month.expenseTotal)}</strong>
@@ -312,9 +312,9 @@ function MonthDetailsModal({
                 <div className="empty-state wide">Nenhuma despesa neste mês.</div>
               ) : (
                 <>
-                  <div className="expense-summary-grid details-grid">
+                  <div className="month-details-expense-summary month-details-expense-details">
                     {month.relatedExpenseCards.map((card) => (
-                      <article className="related-income-card" key={card.id}>
+                      <article className="month-details-related-card" key={card.id}>
                         <span>
                           {card.isMovement
                             ? "Despesa registrada"
@@ -328,10 +328,10 @@ function MonthDetailsModal({
                       </article>
                     ))}
                   </div>
-                  <div className="person-grid expense-columns">
+                  <div className="month-details-person-grid month-details-expense-columns">
                     {month.billsByPerson.map(({ person, bills }) => (
                       <section
-                        className="person-column expense-column"
+                        className="month-details-person-column month-details-expense-column"
                         key={person}
                       >
                         <div className="column-heading">
@@ -355,10 +355,10 @@ function MonthDetailsModal({
                             editKey,
                           }) => (
                             <article
-                              className="expense-card"
+                              className="month-details-expense-card"
                               key={`${person}-${toggleKey}`}
                             >
-                              <div className="expense-card-main">
+                              <div className="month-details-expense-card-main">
                                 <div className="expense-category">
                                   <ReceiptText size={15} />
                                   <div>
@@ -382,8 +382,8 @@ function MonthDetailsModal({
                                   )}
                                 </strong>
                               </div>
-                              <div className="expense-card-meta">
-                                <div className="expense-card-meta-info">
+                              <div className="month-details-expense-card-meta">
+                                <div className="month-details-expense-card-meta-info">
                                   <span>
                                     <CalendarDays size={13} />
                                     Vence em {dateFormatter.format(expenseDate)}
@@ -393,7 +393,7 @@ function MonthDetailsModal({
                                     Receita: {incomeLabel}
                                   </span>
                                 </div>
-                                <div className="expense-card-actions">
+                                <div className="month-details-expense-card-actions">
                                   <button
                                     className="entry-edit-button"
                                     type="button"
@@ -443,10 +443,10 @@ function MonthDetailsModal({
                 </>
               ))}
           </section>
-          <section className="month-section expenses-section" aria-labelledby="balance-title">
-            <div className="section-heading">
+          <section className="month-section month-details-section month-details-balance-section" aria-labelledby="balance-title">
+            <div className="section-heading month-details-section-heading">
               <button
-                className="section-collapse-trigger"
+                className="section-collapse-trigger month-details-collapse-trigger"
                 type="button"
                 aria-expanded={expandedSections.balance}
                 onClick={() =>
@@ -463,11 +463,11 @@ function MonthDetailsModal({
                   <ChevronDown size={16} />
                 )}
               </button>
-              <span className="section-caption">
+              <span className="section-caption month-details-section-caption">
                 {month.paymentBalances.length} pagamentos
               </span>
             </div>
-            <article className="month-total-card balance-total-card">
+            <article className="month-details-total-card month-details-balance-total-card">
               <div>
                 <span>Saldo total</span>
                 <strong className={month.balance >= 0 ? "positive" : "negative"}>
@@ -480,9 +480,9 @@ function MonthDetailsModal({
               (month.paymentBalances.length === 0 ? (
                 <div className="empty-state wide">Nenhum saldo por pagamento neste mês.</div>
               ) : (
-                <div className="payment-balance-grid">
+                <div className="month-details-payment-balance-grid">
                   {month.paymentBalances.map((payment) => (
-                    <article className="payment-balance-card" key={payment.id}>
+                    <article className="month-details-payment-balance-card" key={payment.id}>
                       <header>
                         <strong>{payment.label}</strong>
                         <small>

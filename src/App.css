@@ -2090,8 +2090,238 @@
   overflow-y: auto;
   padding: 10px;
 }
-.month-details-modal .month-total-card strong {
+.month-details-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.month-details-collapse-trigger {
+  flex: 1;
+}
+.month-details-section-caption {
+  flex-shrink: 0;
+}
+.month-details-total-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 112px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.month-details-total-card span,
+.month-details-total-card small,
+.month-details-related-card span,
+.month-details-related-card small {
+  display: block;
+}
+.month-details-total-card span,
+.month-details-related-card span {
+  color: #b5cec1;
+  font-size: 10px;
+}
+.month-details-total-card strong {
+  display: block;
+  margin: 5px 0 3px;
   font-size: 24px;
+}
+.month-details-total-card small,
+.month-details-related-card small {
+  color: #b5cec1;
+  font-size: 10px;
+}
+.month-details-income-total-card {
+  color: #fff;
+  background: var(--green);
+  border-color: var(--green);
+}
+.month-details-person-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.month-details-person-column {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
+.month-details-income-card,
+.month-details-expense-card {
+  padding: 5px 0;
+  border-top: 1px solid #edf0ec;
+}
+.month-details-income-card,
+.month-details-income-card time,
+.month-details-expense-card-meta,
+.month-details-expense-card-meta span {
+  display: flex;
+  align-items: center;
+}
+.month-details-income-card {
+  justify-content: space-between;
+  gap: 12px;
+}
+.month-details-income-card strong,
+.month-details-income-card span {
+  display: block;
+}
+.month-details-income-card strong {
+  color: var(--ink);
+  font:
+    600 15px "Space Grotesk",
+    sans-serif;
+}
+.month-details-income-card span,
+.month-details-income-card time,
+.month-details-expense-card-meta {
+  color: var(--muted);
+  font-size: 10px;
+}
+.month-details-income-card span {
+  margin-top: 3px;
+}
+.month-details-income-card time {
+  gap: 5px;
+  white-space: nowrap;
+}
+.month-details-expenses-section,
+.month-details-balance-section {
+  margin-top: 20px;
+}
+.month-details-expense-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.month-details-expense-details {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.month-details-expense-total-card {
+  color: var(--ink);
+  background: #f8e6d8;
+  border-color: #efd4c0;
+}
+.month-details-expense-total-card span,
+.month-details-expense-total-card small {
+  color: #9a6d52;
+}
+.month-details-related-card {
+  min-height: 90px;
+  padding: 10px;
+  border: 1px solid #dce8df;
+  border-radius: 10px;
+  background: #eef5ec;
+}
+.month-details-related-card span {
+  color: #77907e;
+}
+.month-details-related-card strong {
+  display: block;
+  margin: 12px 0 7px;
+  color: var(--ink);
+  font:
+    600 20px "Space Grotesk",
+    sans-serif;
+}
+.month-details-related-card small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #77907e;
+}
+.month-details-expense-column {
+  background: #fbfcf9;
+}
+.month-details-balance-total-card {
+  color: var(--ink);
+  background: #e7f2f8;
+  border-color: #d3e5f2;
+}
+.month-details-balance-total-card span,
+.month-details-balance-total-card small {
+  color: #5e8292;
+}
+.month-details-payment-balance-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.month-details-payment-balance-card {
+  padding: 10px;
+  border: 1px solid #dce8df;
+  border-radius: 10px;
+  background: #f6faf8;
+}
+.month-details-payment-balance-card header {
+  margin-bottom: 8px;
+}
+.month-details-payment-balance-card header strong {
+  display: block;
+  color: var(--ink);
+  font:
+    600 14px "Space Grotesk",
+    sans-serif;
+}
+.month-details-payment-balance-card header small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.month-details-payment-balance-card p {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 10px;
+}
+.month-details-payment-balance-card p + p {
+  margin-top: 4px;
+}
+.month-details-payment-balance-card p strong {
+  color: var(--ink);
+}
+.month-details-expense-card-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+}
+.month-details-expense-card-meta {
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 5px;
+}
+.month-details-expense-card-meta-info {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.month-details-expense-card-meta-info span {
+  min-width: 0;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.month-details-expense-card-meta-info span:nth-child(2) {
+  color: #6f8b78;
+}
+.month-details-expense-card-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
 }
 @media (max-width: 640px) {
   .utility-page {
@@ -2140,24 +2370,23 @@
   .person-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .expense-summary-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .month-details-person-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .expense-summary-grid.details-grid {
+  .month-details-expense-details,
+  .month-details-payment-balance-grid {
     grid-template-columns: 1fr;
   }
-  .month-total-card {
+  .month-details-total-card {
     min-height: 90px;
-  }
-  .payment-balance-grid {
-    grid-template-columns: 1fr;
   }
   .month-details-modal-header,
   .month-details-modal-content {
     padding-left: 10px;
     padding-right: 10px;
   }
-  .expenses-section {
+  .month-details-expenses-section,
+  .month-details-balance-section {
     margin-top: 10px;
   }
   .dashboard-footer-card {
