@@ -287,9 +287,9 @@ export function BillsPage({ movements, onToggleBill, isBillPaid, sharedEntryOver
 
   return (
     <PageFrame
-      eyebrow="CONTAS"
+      eyebrow="Visão geral"
       title="Contas e despesas"
-      copy="Veja todas as despesas registradas manualmente e as contas planejadas, organizadas por mês e ordenadas pela data."
+      copy="No lançamento manual, selecione Despesa no campo Tipo. Contas previstas nos períodos financeiros aparecem como planejadas. Marque qualquer item como pago."
     >
       {monthGroups.length === 0 ? (
         <div className="empty-state wide">Nenhuma conta ou despesa disponível.</div>
@@ -306,15 +306,15 @@ export function BillsPage({ movements, onToggleBill, isBillPaid, sharedEntryOver
               onToggle={() => setExpandedKey((current) => (current === group.key ? null : group.key))}
             >
               <SectionBlock
-                title="Despesas registradas"
-                copy="Lançamentos criados manualmente nesta conta."
+                title="Despesas lançadas"
+                copy="Movimentos manuais com tipo Despesa."
                 count={manualItems.length}
               >
                 <BillsList items={manualItems} onToggleBill={onToggleBill} isBillPaid={isBillPaid} />
               </SectionBlock>
               <SectionBlock
                 title="Contas planejadas"
-                copy="Contas previstas no calendário financeiro, incluindo meses futuros."
+                copy="Contas cadastradas nos períodos financeiros; o vencimento define a data."
                 count={plannedItems.length}
               >
                 <BillsList items={plannedItems} onToggleBill={onToggleBill} isBillPaid={isBillPaid} />
@@ -385,7 +385,7 @@ export function IncomePage({ movements, sharedEntryOverrides = {} }: PlanningPag
 
   return (
     <PageFrame
-      eyebrow="RECEITAS"
+      eyebrow="Planejamento"
       title="Receitas"
       copy="As entradas manuais vêm dos lançamentos salvos nesta conta. Os pagamentos planejados mostram as receitas previstas de Você e Esposa."
     >
