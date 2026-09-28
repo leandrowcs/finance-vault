@@ -283,7 +283,6 @@ function MonthDetailsModal({
                 }))
               }
             >
-              <p className="eyebrow">COMPROMISSOS FINANCEIROS</p>
               <h2 id="expenses-title">Despesas do mês</h2>
               {expandedSections.expenses ? (
                 <ChevronUp size={16} />
