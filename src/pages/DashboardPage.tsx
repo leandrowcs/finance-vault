@@ -16,7 +16,7 @@ import { financePeriods, type SeedPayPeriod } from "../data/financeSeed";
 import { FloatingActionButton } from "../components/FloatingActionButton";
 import { MovementModal } from "../components/MovementModal";
 import { cgiPaymentDate, cgiPaymentLabel, currency, dateKey, dueDate, monthLabels } from "../lib/finance";
-import type { Bill, Movement } from "../types/finance";
+import type { Bill, Goal, Movement } from "../types/finance";
 
 type Person = "Leandro" | "Ketlin";
 type ExpenseEntry = {
@@ -41,6 +41,7 @@ type PaymentBalance = {
   date: string;
   income: number;
   expense: number;
+  savings: number;
   balance: number;
 };
 type MonthSummary = {
@@ -49,6 +50,7 @@ type MonthSummary = {
   periods: SeedPayPeriod[];
   incomeTotal: number;
   expenseTotal: number;
+  savingsTotal: number;
   balance: number;
   incomeByPerson: Record<Person, number>;
   expenseByPerson: Record<Person, number>;
@@ -65,6 +67,7 @@ type MonthSummary = {
 };
 type DashboardPageProps = {
   movements: Movement[];
+  goals: Goal[];
   greeting: string;
   openedDateLabel: string;
   daysUntilNextPayment: number;
@@ -498,7 +501,11 @@ function MonthDetailsModal({
                         <strong>{currency.format(payment.expense)}</strong>
                       </p>
                       <p>
-                        <span>Saldo</span>
+                        <span>Aportes</span>
+                        <strong>{currency.format(payment.savings)}</strong>
+                      </p>
+                      <p>
+                        <span>Saldo livre</span>
                         <strong className={payment.balance >= 0 ? "positive" : "negative"}>
                           {currency.format(payment.balance)}
                         </strong>
@@ -516,6 +523,7 @@ function MonthDetailsModal({
 
 export function DashboardPage({
   movements,
+  goals,
   greeting,
   openedDateLabel,
   daysUntilNextPayment,
@@ -729,6 +737,12 @@ export function DashboardPage({
         0,
       );
       const incomeTotal = incomeByPerson.Leandro + incomeByPerson.Ketlin;
+      const goalContributions = goals.flatMap((goal) =>
+        goal.contributions
+          .filter((contribution) => contribution.date.startsWith(key))
+          .map((contribution) => ({ ...contribution, goalName: goal.name })),
+      );
+      const savingsTotal = goalContributions.reduce((total, item) => total + item.amount, 0);
       const label = monthLabel(date);
       const relatedExpensesByIncome = new Map<string, { amount: number; date: string }>();
       billsByPerson.forEach(({ bills }) => {
@@ -750,7 +764,7 @@ export function DashboardPage({
       );
       const paymentBalancesByLabel = new Map<
         string,
-        { income: number; expense: number; date: string }
+        { income: number; expense: number; savings: number; date: string }
       >();
       people.forEach((person) => {
         incomeEntriesByPerson[person].forEach((entry) => {
@@ -761,6 +775,7 @@ export function DashboardPage({
           paymentBalancesByLabel.set(paymentLabel, {
             income: (current?.income ?? 0) + entry.amount,
             expense: current?.expense ?? 0,
+            savings: current?.savings ?? 0,
             date: current?.date ?? dateKey(normalizedPaymentDate),
           });
         });
@@ -774,8 +789,21 @@ export function DashboardPage({
             expense:
               (current?.expense ?? 0) +
               allocatedAmount(bill.amount, bill.owner),
+            savings: current?.savings ?? 0,
             date: current?.date ?? dateKey(normalizedPaymentDate),
           });
+        });
+      });
+      goalContributions.forEach((contribution) => {
+        const contributionDate = new Date(`${contribution.date}T12:00:00`);
+        const paymentDate = cgiPaymentDate(contributionDate);
+        const paymentLabel = cgiPaymentLabel(paymentDate);
+        const current = paymentBalancesByLabel.get(paymentLabel);
+        paymentBalancesByLabel.set(paymentLabel, {
+          income: current?.income ?? 0,
+          expense: current?.expense ?? 0,
+          savings: (current?.savings ?? 0) + contribution.amount,
+          date: current?.date ?? dateKey(paymentDate),
         });
       });
       const paymentBalances: PaymentBalance[] = [...paymentBalancesByLabel.entries()]
@@ -785,7 +813,8 @@ export function DashboardPage({
           date: values.date,
           income: values.income,
           expense: values.expense,
-          balance: values.income - values.expense,
+          savings: values.savings,
+          balance: values.income - values.expense - values.savings,
         }))
         .sort((left, right) => left.date.localeCompare(right.date));
 
@@ -795,7 +824,8 @@ export function DashboardPage({
         periods,
         incomeTotal,
         expenseTotal,
-        balance: incomeTotal - expenseTotal,
+        savingsTotal,
+        balance: incomeTotal - expenseTotal - savingsTotal,
         incomeByPerson,
         expenseByPerson,
         incomeEntriesByPerson,
@@ -804,7 +834,7 @@ export function DashboardPage({
         paymentBalances,
       };
     });
-  }, [currentYear, movements, isBillPaid, entryOverrides]);
+  }, [currentYear, movements, goals, isBillPaid, entryOverrides]);
 
   const selectedMonth =
     months.find((month) => month.key === selectedMonthKey) ?? null;
@@ -831,15 +861,17 @@ export function DashboardPage({
     };
     const incomeTotal = incomeByPerson.Leandro + incomeByPerson.Ketlin;
     const expenseTotal = expenseByPerson.Leandro + expenseByPerson.Ketlin;
+    const savingsTotal = months.reduce((total, month) => total + month.savingsTotal, 0);
 
     return {
       incomeTotal,
       expenseTotal,
-      balance: incomeTotal - expenseTotal,
+      savingsTotal,
+      balance: incomeTotal - expenseTotal - savingsTotal,
       incomeByPerson,
       expenseByPerson,
       activeMonths: months.filter(
-        (month) => month.incomeTotal > 0 || month.expenseTotal > 0,
+        (month) => month.incomeTotal > 0 || month.expenseTotal > 0 || month.savingsTotal > 0,
       ).length,
     };
   }, [months]);
@@ -879,14 +911,19 @@ export function DashboardPage({
             <strong>{currency.format(yearSummary.expenseTotal)}</strong>
             <small>Contas e lançamentos</small>
           </article>
+          <article className="year-summary-card savings">
+            <span>Aportes no ano</span>
+            <strong>{currency.format(yearSummary.savingsTotal)}</strong>
+            <small>Transferências para objetivos</small>
+          </article>
           <article className="year-summary-card balance">
-            <span>Saldo acumulado</span>
+            <span>Saldo livre acumulado</span>
             <strong
               className={yearSummary.balance >= 0 ? "positive" : "negative"}
             >
               {currency.format(yearSummary.balance)}
             </strong>
-            <small>Receitas menos despesas</small>
+            <small>Receitas menos despesas e aportes</small>
           </article>
         </div>
         <div className="year-people-summary">
@@ -943,8 +980,8 @@ export function DashboardPage({
                   <div>
                     <strong>{month.label}</strong>
                     <small>
-                      {month.incomeTotal > 0 || month.expenseTotal > 0
-                        ? `${currency.format(month.incomeTotal)} em receitas · ${currency.format(month.expenseTotal)} em despesas`
+                      {month.incomeTotal > 0 || month.expenseTotal > 0 || month.savingsTotal > 0
+                        ? `${currency.format(month.incomeTotal)} receitas · ${currency.format(month.expenseTotal)} despesas · ${currency.format(month.savingsTotal)} aportes`
                         : "Sem movimentações"}
                     </small>
                   </div>
@@ -972,8 +1009,12 @@ export function DashboardPage({
                         <span>Despesas totais</span>
                         <strong>{currency.format(month.expenseTotal)}</strong>
                       </article>
+                      <article className="month-quick-card savings">
+                        <span>Aportes a objetivos</span>
+                        <strong>{currency.format(month.savingsTotal)}</strong>
+                      </article>
                       <article className="month-quick-card balance">
-                        <span>Balanço do mês</span>
+                        <span>Saldo livre</span>
                         <strong
                           className={
                             month.balance >= 0 ? "positive" : "negative"

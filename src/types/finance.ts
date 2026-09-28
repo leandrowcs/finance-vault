@@ -18,6 +18,20 @@ export type Movement = {
   recurrenceIndex?: number;
 };
 
+export type GoalContribution = {
+  id: string;
+  amount: number;
+  date: string;
+};
+
+export type Goal = {
+  id: string;
+  name: string;
+  target: number;
+  saved: number;
+  contributions: GoalContribution[];
+};
+
 export type CalendarItem = {
   type: "income" | "bill";
   title: string;

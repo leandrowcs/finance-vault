@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
 import { financePeriods } from "../data/financeSeed";
 import { currency, dateKey, dueDate } from "../lib/finance";
-import type { Movement } from "../types/finance";
+import type { Goal, Movement } from "../types/finance";
 
 type EntryOverride = Partial<Movement> & { deleted?: boolean };
 type EntryOverrides = Record<string, EntryOverride>;
@@ -18,9 +18,13 @@ type PlanningPageProps = {
   onToggleBill: (key: string) => void;
   isBillPaid: (key: string) => boolean;
   sharedEntryOverrides?: EntryOverrides;
+  goals?: Goal[];
+  goalsSyncError?: string;
+  onCreateGoal?: (goal: Goal) => Promise<void>;
+  onDeleteGoal?: (goalId: string) => Promise<void>;
+  onContributeGoal?: (goalId: string, amount: number, date: string) => Promise<void>;
 };
 
-type Goal = { id: string; name: string; target: number; saved: number };
 type ItemKind = "manual" | "planned";
 type BillListItem = {
   id: string;
@@ -425,39 +429,51 @@ export function IncomePage({ movements, sharedEntryOverrides = {} }: PlanningPag
   );
 }
 
-function goalsStorageKey(storageKey: string) {
-  return `financevault:goals:${storageKey}`;
-}
-
-export function GoalsPage({ storageKey }: PlanningPageProps) {
-  const [goals, setGoals] = useState<Goal[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(goalsStorageKey(storageKey)) ?? "[]") as Goal[];
-    } catch {
-      return [];
-    }
-  });
+export function GoalsPage({ goals = [], goalsSyncError = "", onCreateGoal, onDeleteGoal, onContributeGoal }: PlanningPageProps) {
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
+  const [contributionAmounts, setContributionAmounts] = useState<Record<string, string>>({});
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    localStorage.setItem(goalsStorageKey(storageKey), JSON.stringify(goals));
-  }, [goals, storageKey]);
-
-  const addGoal = (event: React.FormEvent<HTMLFormElement>) => {
+  const addGoal = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const amount = Number(target);
-    if (!name.trim() || !amount || amount <= 0) return;
-    setGoals((current) => [
-      ...current,
-      { id: crypto.randomUUID(), name: name.trim(), target: amount, saved: 0 },
-    ]);
-    setName("");
-    setTarget("");
+    if (!name.trim() || !Number.isFinite(amount) || amount <= 0 || !onCreateGoal) return;
+    setError("");
+    try {
+      await onCreateGoal({ id: crypto.randomUUID(), name: name.trim(), target: amount, saved: 0, contributions: [] });
+      setName("");
+      setTarget("");
+    } catch {
+      setError("Objetivo salvo localmente; sincronização falhou.");
+    }
+  };
+
+  const addContribution = async (event: React.FormEvent<HTMLFormElement>, goal: Goal) => {
+    event.preventDefault();
+    const amount = Number(contributionAmounts[goal.id]);
+    if (!Number.isFinite(amount) || amount <= 0 || !onContributeGoal) return;
+    setError("");
+    try {
+      await onContributeGoal(goal.id, amount, dateKey(new Date()));
+      setContributionAmounts((current) => ({ ...current, [goal.id]: "" }));
+    } catch {
+      setError("Aporte salvo localmente; sincronização falhou.");
+    }
+  };
+
+  const removeGoal = async (goalId: string) => {
+    if (!onDeleteGoal) return;
+    setError("");
+    try {
+      await onDeleteGoal(goalId);
+    } catch {
+      setError("Não foi possível excluir o objetivo sincronizado.");
+    }
   };
 
   return (
-    <PageFrame eyebrow="PLANEJAMENTO" title="Objetivos" copy="Transforme planos em metas acompanháveis.">
+    <PageFrame eyebrow="PLANEJAMENTO" title="Objetivos" copy="Aportes transferem saldo disponível para uma meta; não são receita nem despesa.">
       <form className="goal-form" onSubmit={addGoal}>
         <label>
           <span>Nome</span>
@@ -480,11 +496,12 @@ export function GoalsPage({ storageKey }: PlanningPageProps) {
             required
           />
         </label>
-        <button className="solid-button" type="submit">
+        <button className="solid-button" type="submit" disabled={!onCreateGoal}>
           <Plus size={16} />
           Adicionar objetivo
         </button>
       </form>
+      {(goalsSyncError || error) && <p className="movement-error" role="status">{error || goalsSyncError}</p>}
       <div className="goal-grid">
         {goals.length === 0 ? (
           <div className="empty-state wide">Nenhum objetivo criado.</div>
@@ -504,7 +521,7 @@ export function GoalsPage({ storageKey }: PlanningPageProps) {
                     className="icon-button"
                     type="button"
                     aria-label={`Excluir objetivo ${goal.name}`}
-                    onClick={() => setGoals((current) => current.filter((item) => item.id !== goal.id))}
+                    onClick={() => void removeGoal(goal.id)}
                   >
                     <Trash2 size={16} />
                   </button>
@@ -513,6 +530,29 @@ export function GoalsPage({ storageKey }: PlanningPageProps) {
                   <span style={{ width: `${progress}%` }} />
                 </div>
                 <small>{Math.round(progress)}% concluído</small>
+                <form className="goal-contribution-form" onSubmit={(event) => void addContribution(event, goal)}>
+                  <label>
+                    <span>Aporte</span>
+                    <input
+                      aria-label={`Valor do aporte para ${goal.name}`}
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={contributionAmounts[goal.id] ?? ""}
+                      onChange={(event) => setContributionAmounts((current) => ({ ...current, [goal.id]: event.target.value }))}
+                      placeholder="0,00"
+                      required
+                    />
+                  </label>
+                  <button className="outline-button" type="submit" disabled={!onContributeGoal}>Registrar aporte</button>
+                </form>
+                {goal.contributions.length > 0 && (
+                  <div className="goal-contribution-history">
+                    {goal.contributions.slice(-3).reverse().map((contribution) => (
+                      <small key={contribution.id}>{currency.format(contribution.amount)} · {formatDate(contribution.date)}</small>
+                    ))}
+                  </div>
+                )}
               </article>
             );
           })

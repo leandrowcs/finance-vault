@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
-import { collection, deleteDoc, doc, onSnapshot, setDoc, updateDoc } from "firebase/firestore";
+import { arrayUnion, collection, deleteDoc, doc, increment, onSnapshot, setDoc, updateDoc } from "firebase/firestore";
 import { financePeriods, totalIncome } from "./data/financeSeed";
 import { AppNavigation, type NavigationView } from "./components/AppNavigation";
 import { AppTopbar } from "./components/AppTopbar";
@@ -11,7 +11,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { BillsPage, GoalsPage, IncomePage, MembersPage, SettingsPage } from "./pages/PlanningPages";
 import { dateKey, dueDate, nextPaymentPeriod } from "./lib/finance";
 import { db } from "./lib/firebase";
-import type { CalendarItem, Movement } from "./types/finance";
+import type { CalendarItem, Goal, GoalContribution, Movement } from "./types/finance";
 import "./App.css";
 
 type AppProps = { user?: User | null; onSignOut?: () => Promise<void> };
@@ -48,6 +48,44 @@ function deletedMovementsStorageKey(user: User | null) {
 
 function entryOverridesStorageKey(user: User | null) {
   return `financevault:entry-overrides:${user?.uid ?? "local"}`;
+}
+
+function goalsStorageKey(storageKey: string) {
+  return `financevault:goals:${storageKey}`;
+}
+
+function normalizeGoal(id: string, data: Record<string, unknown>): Goal {
+  const contributions = Array.isArray(data.contributions)
+    ? data.contributions.filter((item): item is GoalContribution =>
+        Boolean(item) &&
+        typeof item === "object" &&
+        typeof (item as GoalContribution).id === "string" &&
+        Number.isFinite((item as GoalContribution).amount) &&
+        typeof (item as GoalContribution).date === "string",
+      )
+    : [];
+  const saved = contributions.reduce((total, item) => total + item.amount, 0);
+  return {
+    id,
+    name: typeof data.name === "string" ? data.name : "Objetivo",
+    target: Number.isFinite(data.target) && Number(data.target) > 0 ? Number(data.target) : 1,
+    saved: contributions.length > 0 ? saved : Number.isFinite(data.saved) ? Number(data.saved) : 0,
+    contributions,
+  };
+}
+
+function readStoredGoals(storageKey: string) {
+  try {
+    const stored = localStorage.getItem(goalsStorageKey(storageKey));
+    if (!stored) return [];
+    const parsed = JSON.parse(stored) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is Goal => Boolean(item) && typeof item === "object" && typeof (item as Goal).id === "string")
+          .map((item) => normalizeGoal(item.id, item as unknown as Record<string, unknown>))
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function normalizeEntryOverrides(overrides: EntryOverrides) {
@@ -142,6 +180,9 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const [movements, setMovements] = useState<Movement[]>([]);
   const [isMovementModalOpen, setIsMovementModalOpen] = useState(false);
   const [movementsLoaded, setMovementsLoaded] = useState(false);
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [goalsLoaded, setGoalsLoaded] = useState(false);
+  const [goalsSyncError, setGoalsSyncError] = useState("");
   const changeView = (view: NavigationView) => {
     setActiveView(view);
     if (typeof window !== "undefined") window.history.replaceState(null, "", `#${view}`);
@@ -199,6 +240,70 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     }
     setMovementsLoaded(true);
   }, [user]);
+  useEffect(() => {
+    const storageKey = user?.uid ?? "local";
+    const localGoals = readStoredGoals(storageKey);
+    setGoals(localGoals);
+    setGoalsLoaded(false);
+    setGoalsSyncError("");
+    if (!user || !db) {
+      setGoalsLoaded(true);
+      return;
+    }
+    let initialSnapshot = true;
+    let active = true;
+    const goalsRef = collection(db, "users", user.uid, "goals");
+    const unsubscribe = onSnapshot(goalsRef, (snapshot) => {
+      const remoteGoals = snapshot.docs.map((item) => normalizeGoal(item.id, item.data()));
+      if (initialSnapshot) {
+        initialSnapshot = false;
+        const remoteById = new Map(remoteGoals.map((goal) => [goal.id, goal]));
+        localGoals.forEach((localGoal) => {
+          const remoteGoal = remoteById.get(localGoal.id);
+          const goalRef = doc(db!, "users", user.uid, "goals", localGoal.id);
+          if (!remoteGoal) {
+            remoteById.set(localGoal.id, localGoal);
+            void setDoc(goalRef, localGoal).catch(() => {
+              if (active) setGoalsSyncError("Sincronização indisponível; objetivos mantidos neste dispositivo.");
+            });
+            return;
+          }
+          const remoteContributionIds = new Set(remoteGoal.contributions.map((item) => item.id));
+          const missingContributions = localGoal.contributions.filter((item) => !remoteContributionIds.has(item.id));
+          if (missingContributions.length > 0) {
+            const mergedContributions = [...remoteGoal.contributions, ...missingContributions];
+            remoteById.set(localGoal.id, {
+              ...remoteGoal,
+              contributions: mergedContributions,
+              saved: mergedContributions.reduce((total, item) => total + item.amount, 0),
+            });
+            void updateDoc(goalRef, {
+              contributions: arrayUnion(...missingContributions),
+              saved: increment(missingContributions.reduce((total, item) => total + item.amount, 0)),
+            }).catch(() => {
+              if (active) setGoalsSyncError("Sincronização indisponível; aportes mantidos neste dispositivo.");
+            });
+          }
+        });
+        const mergedGoals = [...remoteById.values()];
+        setGoals(mergedGoals);
+        localStorage.setItem(goalsStorageKey(storageKey), JSON.stringify(mergedGoals));
+        setGoalsLoaded(true);
+        return;
+      }
+      setGoals(remoteGoals);
+      localStorage.setItem(goalsStorageKey(storageKey), JSON.stringify(remoteGoals));
+      setGoalsLoaded(true);
+    }, () => {
+      setGoals(localGoals);
+      setGoalsLoaded(true);
+      setGoalsSyncError("Sincronização indisponível; objetivos mantidos neste dispositivo.");
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [user]);
   const saveMovement = async (movement: Movement) => {
     const savedMovements = expandRecurringMovement(movement);
     const savedIds = new Set(savedMovements.map((item) => item.id));
@@ -233,6 +338,54 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       }
     }
   };
+  const saveGoal = async (goal: Goal) => {
+    const nextGoals = [...goals.filter((item) => item.id !== goal.id), goal];
+    setGoals(nextGoals);
+    localStorage.setItem(goalsStorageKey(user?.uid ?? "local"), JSON.stringify(nextGoals));
+    if (user && db) {
+      try {
+        await setDoc(doc(db, "users", user.uid, "goals", goal.id), goal);
+        setGoalsSyncError("");
+      } catch {
+        setGoalsSyncError("Sincronização indisponível; objetivo mantido neste dispositivo.");
+        throw new Error("Goal sync failed");
+      }
+    }
+  };
+  const deleteGoal = async (goalId: string) => {
+    if (user && db) {
+      try {
+        await deleteDoc(doc(db, "users", user.uid, "goals", goalId));
+      } catch {
+        setGoalsSyncError("Sincronização indisponível; objetivo não excluído.");
+        throw new Error("Goal deletion failed");
+      }
+    }
+    const nextGoals = goals.filter((goal) => goal.id !== goalId);
+    setGoals(nextGoals);
+    localStorage.setItem(goalsStorageKey(user?.uid ?? "local"), JSON.stringify(nextGoals));
+    setGoalsSyncError("");
+  };
+  const contributeToGoal = async (goalId: string, amount: number, date: string) => {
+    const contribution: GoalContribution = { id: crypto.randomUUID(), amount, date };
+    const nextGoals = goals.map((goal) => goal.id === goalId
+      ? { ...goal, saved: goal.saved + amount, contributions: [...goal.contributions, contribution] }
+      : goal);
+    setGoals(nextGoals);
+    localStorage.setItem(goalsStorageKey(user?.uid ?? "local"), JSON.stringify(nextGoals));
+    if (user && db) {
+      try {
+        await updateDoc(doc(db, "users", user.uid, "goals", goalId), {
+          contributions: arrayUnion(contribution),
+          saved: increment(amount),
+        });
+        setGoalsSyncError("");
+      } catch {
+        setGoalsSyncError("Sincronização indisponível; aporte mantido neste dispositivo.");
+        throw new Error("Goal contribution sync failed");
+      }
+    }
+  };
   const calendarItems = useMemo(() => {
     const items = new Map<string, CalendarItem[]>();
     const addItem = (date: string, item: CalendarItem) => items.set(date, [...(items.get(date) ?? []), item]);
@@ -256,9 +409,9 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   });
   const isBillPaid = (key: string) => Boolean(billPaidState[key]);
   const handleSignOut = async () => { if (!onSignOut) return; setIsSigningOut(true); setSignOutError(""); try { await onSignOut(); } catch { setSignOutError("Não foi possível sair agora."); setIsSigningOut(false); } };
-  const planningPageProps = { movements, user, displayName, initials, storageKey: user?.uid ?? "local", onSignOut: onSignOut ? () => void handleSignOut() : undefined, onToggleBill: toggleBill, isBillPaid, sharedEntryOverrides: entryOverrides };
-  const pageContent = activeView === "payments" ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} /> : activeView === "dashboard" ? <DashboardPage movements={movements} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onSaveMovement={(movement) => { void saveMovement(movement); }} sharedEntryOverrides={entryOverrides} onEntryOverridesChange={(overrides) => { void saveEntryOverrides(overrides); }} onOpenCalendar={() => changeView("payments")} onOpenMovement={() => setIsMovementModalOpen(true)} storageKey={user?.uid ?? "local"} /> : activeView === "bills" ? <BillsPage {...planningPageProps} /> : activeView === "income" ? <IncomePage {...planningPageProps} /> : activeView === "goals" ? <GoalsPage {...planningPageProps} /> : activeView === "members" ? <MembersPage {...planningPageProps} /> : <SettingsPage {...planningPageProps} />;
+  const planningPageProps = { movements, user, displayName, initials, storageKey: user?.uid ?? "local", onSignOut: onSignOut ? () => void handleSignOut() : undefined, onToggleBill: toggleBill, isBillPaid, sharedEntryOverrides: entryOverrides, goals, goalsSyncError, onCreateGoal: saveGoal, onDeleteGoal: deleteGoal, onContributeGoal: contributeToGoal };
+  const pageContent = activeView === "payments" ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} /> : activeView === "dashboard" ? <DashboardPage movements={movements} goals={goals} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onSaveMovement={(movement) => { void saveMovement(movement); }} sharedEntryOverrides={entryOverrides} onEntryOverridesChange={(overrides) => { void saveEntryOverrides(overrides); }} onOpenCalendar={() => changeView("payments")} onOpenMovement={() => setIsMovementModalOpen(true)} storageKey={user?.uid ?? "local"} /> : activeView === "bills" ? <BillsPage {...planningPageProps} /> : activeView === "income" ? <IncomePage {...planningPageProps} /> : activeView === "goals" ? <GoalsPage {...planningPageProps} /> : activeView === "members" ? <MembersPage {...planningPageProps} /> : <SettingsPage {...planningPageProps} />;
 
-  if (!movementsLoaded) return null;
+  if (!movementsLoaded || !goalsLoaded) return null;
   return <main className="app-shell"><AppNavigation isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} activeView={activeView} onNavigate={changeView} /><section className="content"><AppTopbar user={user} calendarMonth={calendarMonth} isCalendarView={activeView === "payments"} initials={initials} onMenuOpen={() => setIsMenuOpen(true)} onCalendarOpen={() => changeView("payments")} onDashboard={() => changeView("dashboard")} onProfileOpen={() => setIsProfileOpen(true)} />{pageContent}{isProfileOpen && <ProfileModal user={user} displayName={displayName} initials={initials} signOutError={signOutError} isSigningOut={isSigningOut} onClose={() => setIsProfileOpen(false)} onSignOut={onSignOut ? () => void handleSignOut() : undefined} />}{isMovementModalOpen && <MovementModal onClose={() => setIsMovementModalOpen(false)} onSubmit={(movement) => { void saveMovement(movement); setBillPaidState((current) => ({ ...current, [movementBillKey(movement.id)]: false })); setIsMovementModalOpen(false); }} />}</section></main>;
 }

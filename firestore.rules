@@ -41,5 +41,9 @@ service cloud.firestore {
     match /users/{userId}/settings/{settingId} {
       allow read, write: if signedIn() && request.auth.uid == userId;
     }
+
+    match /users/{userId}/goals/{goalId} {
+      allow read, write: if signedIn() && request.auth.uid == userId;
+    }
   }
 }
