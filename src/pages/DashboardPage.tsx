@@ -739,8 +739,11 @@ export function DashboardPage({
       const incomeTotal = incomeByPerson.Leandro + incomeByPerson.Ketlin;
       const goalContributions = goals.flatMap((goal) =>
         goal.contributions
-          .filter((contribution) => contribution.date.startsWith(key))
-          .map((contribution) => ({ ...contribution, goalName: goal.name })),
+          .filter((contribution) => (contribution.incomeSourceDate ?? contribution.date).startsWith(key))
+          .map((contribution) => ({
+            ...contribution,
+            sourceDate: contribution.incomeSourceDate ?? contribution.date,
+          })),
       );
       const savingsTotal = goalContributions.reduce((total, item) => total + item.amount, 0);
       const label = monthLabel(date);
@@ -795,8 +798,8 @@ export function DashboardPage({
         });
       });
       goalContributions.forEach((contribution) => {
-        const contributionDate = new Date(`${contribution.date}T12:00:00`);
-        const paymentDate = cgiPaymentDate(contributionDate);
+        const sourceDate = new Date(`${contribution.sourceDate}T12:00:00`);
+        const paymentDate = cgiPaymentDate(sourceDate);
         const paymentLabel = cgiPaymentLabel(paymentDate);
         const current = paymentBalancesByLabel.get(paymentLabel);
         paymentBalancesByLabel.set(paymentLabel, {

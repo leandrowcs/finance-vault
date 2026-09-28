@@ -72,7 +72,7 @@ export function MovementModal({ onClose, onSubmit, initialMovement, onDelete }: 
             </div>
           </div>
           {error && <p className="movement-error">{error}</p>}
-          <div className={onDelete && isEditing ? "movement-form-actions" : ""}><button className="solid-button movement-submit" type="submit">{isEditing ? "Salvar alterações" : "Adicionar movimento"}</button>{onDelete && isEditing && <button className="entry-delete-button movement-delete-button" type="button" onClick={onDelete}>Excluir lançamento</button>}</div>
+          <div className={onDelete && isEditing ? "movement-form-actions" : ""}><button className="solid-button objective-button movement-submit" type="submit">{isEditing ? "Salvar alterações" : "Adicionar movimento"}</button>{onDelete && isEditing && <button className="entry-delete-button movement-delete-button" type="button" onClick={onDelete}>Excluir lançamento</button>}</div>
         </form>
       </section>
     </div>

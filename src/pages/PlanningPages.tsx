@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
 import { financePeriods } from "../data/financeSeed";
 import { currency, dateKey, dueDate } from "../lib/finance";
-import type { Goal, Movement } from "../types/finance";
+import type { Goal, GoalIncomeSource, Movement } from "../types/finance";
 
 type EntryOverride = Partial<Movement> & { deleted?: boolean };
 type EntryOverrides = Record<string, EntryOverride>;
@@ -22,7 +22,7 @@ type PlanningPageProps = {
   goalsSyncError?: string;
   onCreateGoal?: (goal: Goal) => Promise<void>;
   onDeleteGoal?: (goalId: string) => Promise<void>;
-  onContributeGoal?: (goalId: string, amount: number, date: string) => Promise<void>;
+  onContributeGoal?: (goalId: string, amount: number, source: GoalIncomeSource) => Promise<void>;
 };
 
 type ItemKind = "manual" | "planned";
@@ -429,11 +429,74 @@ export function IncomePage({ movements, sharedEntryOverrides = {} }: PlanningPag
   );
 }
 
-export function GoalsPage({ goals = [], goalsSyncError = "", onCreateGoal, onDeleteGoal, onContributeGoal }: PlanningPageProps) {
+export function GoalsPage({ movements, sharedEntryOverrides = {}, goals = [], goalsSyncError = "", onCreateGoal, onDeleteGoal, onContributeGoal }: PlanningPageProps) {
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
   const [contributionAmounts, setContributionAmounts] = useState<Record<string, string>>({});
+  const [contributionSources, setContributionSources] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
+  const incomeSources = useMemo(() => {
+    const plannedSources: GoalIncomeSource[] = financePeriods.flatMap((period) => [
+      {
+        id: `period-income:${period.date}:leandro`,
+        label: `${sharedEntryOverrides[`period-income:${period.date}:leandro`]?.description ?? "Pagamento planejado"} · Você`,
+        amount: sharedEntryOverrides[`period-income:${period.date}:leandro`]?.amount ?? period.income.leandro,
+        date: sharedEntryOverrides[`period-income:${period.date}:leandro`]?.date ?? period.date,
+        deleted: sharedEntryOverrides[`period-income:${period.date}:leandro`]?.deleted,
+      },
+      {
+        id: `period-income:${period.date}:ketlin`,
+        label: `${sharedEntryOverrides[`period-income:${period.date}:ketlin`]?.description ?? "Pagamento planejado"} · Esposa`,
+        amount: sharedEntryOverrides[`period-income:${period.date}:ketlin`]?.amount ?? period.income.ketlin,
+        date: sharedEntryOverrides[`period-income:${period.date}:ketlin`]?.date ?? period.date,
+        deleted: sharedEntryOverrides[`period-income:${period.date}:ketlin`]?.deleted,
+      },
+    ].filter((source) => !source.deleted).map(({ deleted: _deleted, ...source }) => source));
+    const manualSources: GoalIncomeSource[] = movements
+      .map((movement) => ({ ...movement, ...sharedEntryOverrides[`movement:${movement.id}`] }))
+      .filter((movement) => !movement.deleted && movement.type === "income")
+      .map((movement) => ({
+        id: movement.id,
+        label: `${movement.description || "Receita manual"} · ${movement.owner}`,
+        amount: movement.amount,
+        date: movement.date,
+      }));
+    return [...plannedSources, ...manualSources]
+      .filter((source) => Number.isFinite(source.amount) && source.amount > 0)
+      .sort((left, right) => left.date.localeCompare(right.date) || left.label.localeCompare(right.label));
+  }, [movements, sharedEntryOverrides]);
+  const availableIncomeSources = useMemo(() => {
+    const allocatedBySource = new Map<string, number>();
+    let unassignedContributions = 0;
+    goals.forEach((goal) => goal.contributions.forEach((contribution) => {
+      if (contribution.incomeSourceId) {
+        allocatedBySource.set(
+          contribution.incomeSourceId,
+          (allocatedBySource.get(contribution.incomeSourceId) ?? 0) + contribution.amount,
+        );
+      } else {
+        unassignedContributions += contribution.amount;
+      }
+    }));
+    return incomeSources.reduce<{
+      legacyRemaining: number;
+      sources: (GoalIncomeSource & { available: number })[];
+    }>((state, source) => {
+      const availableBeforeLegacy = Math.max(0, source.amount - (allocatedBySource.get(source.id) ?? 0));
+      const legacyReserved = Math.min(state.legacyRemaining, availableBeforeLegacy);
+      return {
+        legacyRemaining: state.legacyRemaining - legacyReserved,
+        sources: [...state.sources, {
+          ...source,
+          legacyReserved,
+          available: availableBeforeLegacy - legacyReserved,
+        }],
+      };
+    }, { legacyRemaining: unassignedContributions, sources: [] }).sources;
+  }, [goals, incomeSources]);
+  const hasUnassignedContributions = goals.some((goal) =>
+    goal.contributions.some((contribution) => !contribution.incomeSourceId),
+  );
 
   const addGoal = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -452,13 +515,18 @@ export function GoalsPage({ goals = [], goalsSyncError = "", onCreateGoal, onDel
   const addContribution = async (event: React.FormEvent<HTMLFormElement>, goal: Goal) => {
     event.preventDefault();
     const amount = Number(contributionAmounts[goal.id]);
-    if (!Number.isFinite(amount) || amount <= 0 || !onContributeGoal) return;
+    const source = availableIncomeSources.find((item) => item.id === contributionSources[goal.id]);
+    if (!Number.isFinite(amount) || amount <= 0 || !source || !onContributeGoal) return;
+    if (amount > source.available + 0.005) {
+      setError("Aporte maior que o saldo disponível dessa receita.");
+      return;
+    }
     setError("");
     try {
-      await onContributeGoal(goal.id, amount, dateKey(new Date()));
+      await onContributeGoal(goal.id, amount, source);
       setContributionAmounts((current) => ({ ...current, [goal.id]: "" }));
     } catch {
-      setError("Aporte salvo localmente; sincronização falhou.");
+      setError("Aporte não registrado; confira a origem, o saldo ou a sincronização.");
     }
   };
 
@@ -473,7 +541,7 @@ export function GoalsPage({ goals = [], goalsSyncError = "", onCreateGoal, onDel
   };
 
   return (
-    <PageFrame eyebrow="PLANEJAMENTO" title="Objetivos" copy="Aportes transferem saldo disponível para uma meta; não são receita nem despesa.">
+    <PageFrame eyebrow="PLANEJAMENTO" title="Objetivos" copy="Metas da sua conta. Cada aporte identifica a receita de origem e reduz o saldo disponível dela.">
       <form className="goal-form" onSubmit={addGoal}>
         <label>
           <span>Nome</span>
@@ -496,12 +564,13 @@ export function GoalsPage({ goals = [], goalsSyncError = "", onCreateGoal, onDel
             required
           />
         </label>
-        <button className="solid-button" type="submit" disabled={!onCreateGoal}>
-          <Plus size={16} />
+        <button className="solid-button objective-button" type="submit" disabled={!onCreateGoal}>
+          <Plus size={18} />
           Adicionar objetivo
         </button>
       </form>
       {(goalsSyncError || error) && <p className="movement-error" role="status">{error || goalsSyncError}</p>}
+      {hasUnassignedContributions && <p className="goal-source-notice">Aportes antigos sem origem reservam saldo das receitas mais antigas.</p>}
       <div className="goal-grid">
         {goals.length === 0 ? (
           <div className="empty-state wide">Nenhum objetivo criado.</div>
@@ -532,11 +601,28 @@ export function GoalsPage({ goals = [], goalsSyncError = "", onCreateGoal, onDel
                 <small>{Math.round(progress)}% concluído</small>
                 <form className="goal-contribution-form" onSubmit={(event) => void addContribution(event, goal)}>
                   <label>
+                    <span>Receita de origem</span>
+                    <select
+                      aria-label={`Receita de origem do aporte para ${goal.name}`}
+                      value={contributionSources[goal.id] ?? ""}
+                      onChange={(event) => setContributionSources((current) => ({ ...current, [goal.id]: event.target.value }))}
+                      required
+                    >
+                      <option value="">Selecione uma receita</option>
+                      {availableIncomeSources.filter((source) => source.available > 0).map((source) => (
+                        <option value={source.id} key={source.id}>
+                          {formatDate(source.date)} · {source.label} · disponível {currency.format(source.available)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
                     <span>Aporte</span>
                     <input
                       aria-label={`Valor do aporte para ${goal.name}`}
                       type="number"
                       min="0.01"
+                      max={availableIncomeSources.find((source) => source.id === contributionSources[goal.id])?.available ?? undefined}
                       step="0.01"
                       value={contributionAmounts[goal.id] ?? ""}
                       onChange={(event) => setContributionAmounts((current) => ({ ...current, [goal.id]: event.target.value }))}
@@ -544,12 +630,14 @@ export function GoalsPage({ goals = [], goalsSyncError = "", onCreateGoal, onDel
                       required
                     />
                   </label>
-                  <button className="outline-button" type="submit" disabled={!onContributeGoal}>Registrar aporte</button>
+                  <button className="outline-button" type="submit" disabled={!onContributeGoal || !availableIncomeSources.some((source) => source.id === contributionSources[goal.id] && source.available > 0)}>Registrar aporte</button>
                 </form>
                 {goal.contributions.length > 0 && (
                   <div className="goal-contribution-history">
                     {goal.contributions.slice(-3).reverse().map((contribution) => (
-                      <small key={contribution.id}>{currency.format(contribution.amount)} · {formatDate(contribution.date)}</small>
+                      <small key={contribution.id}>
+                        {currency.format(contribution.amount)} · {contribution.incomeSourceLabel ?? "Receita sem origem"} · receita {formatDate(contribution.incomeSourceDate ?? contribution.date)} · aporte {formatDate(contribution.date)}
+                      </small>
                     ))}
                   </div>
                 )}

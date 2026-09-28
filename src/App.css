@@ -356,6 +356,14 @@
   font-size: 11px;
   font-weight: 600;
 }
+.objective-button {
+  border: 1px solid var(--line) !important;
+  background: var(--green) !important;
+  color: var(--cream) !important;
+  border-color: var(--green) !important;
+  border-radius: 10px;
+  padding: 10px;
+}
 @media (max-width: 640px) {
   .floating-action-button {
     right: 16px;
@@ -759,7 +767,9 @@
 .utility-accordion-trigger h2 {
   margin: 0;
   color: var(--ink);
-  font: 600 18px "Space Grotesk", sans-serif;
+  font:
+    600 18px "Space Grotesk",
+    sans-serif;
   text-transform: capitalize;
 }
 .utility-accordion-trigger small {
@@ -775,7 +785,7 @@
   white-space: nowrap;
 }
 .utility-chevron {
-  transition: transform .2s ease;
+  transition: transform 0.2s ease;
 }
 .utility-chevron.open {
   transform: rotate(180deg);
@@ -811,7 +821,9 @@
 .utility-section-heading h2 {
   margin: 0;
   color: var(--ink);
-  font: 600 18px "Space Grotesk", sans-serif;
+  font:
+    600 18px "Space Grotesk",
+    sans-serif;
 }
 .utility-section-heading span,
 .utility-row small,
@@ -887,7 +899,7 @@
 }
 .goal-form input:focus {
   border-color: #7cae8b;
-  box-shadow: 0 0 0 3px rgba(124, 174, 139, .14);
+  box-shadow: 0 0 0 3px rgba(124, 174, 139, 0.14);
 }
 .goal-grid {
   display: grid;
@@ -924,7 +936,7 @@
 }
 .goal-contribution-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 120px auto;
   align-items: end;
   gap: 8px;
   margin-top: 12px;
@@ -936,7 +948,8 @@
   font-size: 10px;
   font-weight: 600;
 }
-.goal-contribution-form input {
+.goal-contribution-form input,
+.goal-contribution-form select {
   min-width: 0;
   min-height: 36px;
   padding: 8px 10px;
@@ -945,6 +958,14 @@
   color: var(--ink);
   background: #fff;
   font-size: 12px;
+}
+.goal-contribution-form label:first-child {
+  grid-column: 1 / -1;
+}
+.goal-source-notice {
+  margin: 0 0 14px;
+  color: #805d27;
+  font-size: 11px;
 }
 .goal-contribution-form button {
   min-height: 36px;

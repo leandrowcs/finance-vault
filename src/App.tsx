@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
-import { arrayUnion, collection, deleteDoc, doc, increment, onSnapshot, setDoc, updateDoc } from "firebase/firestore";
+import { arrayUnion, collection, deleteDoc, doc, increment, onSnapshot, runTransaction, setDoc, updateDoc } from "firebase/firestore";
 import { financePeriods, totalIncome } from "./data/financeSeed";
 import { AppNavigation, type NavigationView } from "./components/AppNavigation";
 import { AppTopbar } from "./components/AppTopbar";
@@ -11,7 +11,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { BillsPage, GoalsPage, IncomePage, MembersPage, SettingsPage } from "./pages/PlanningPages";
 import { dateKey, dueDate, nextPaymentPeriod } from "./lib/finance";
 import { db } from "./lib/firebase";
-import type { CalendarItem, Goal, GoalContribution, Movement } from "./types/finance";
+import type { CalendarItem, Goal, GoalContribution, GoalIncomeSource, Movement } from "./types/finance";
 import "./App.css";
 
 type AppProps = { user?: User | null; onSignOut?: () => Promise<void> };
@@ -355,7 +355,27 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const deleteGoal = async (goalId: string) => {
     if (user && db) {
       try {
-        await deleteDoc(doc(db, "users", user.uid, "goals", goalId));
+        await runTransaction(db, async (transaction) => {
+          const goalRef = doc(db!, "users", user.uid, "goals", goalId);
+          const allocationRef = sharedStateRef(user);
+          const [goalSnapshot, allocationSnapshot] = await Promise.all([
+            transaction.get(goalRef),
+            transaction.get(allocationRef),
+          ]);
+          if (!goalSnapshot.exists()) return;
+          const goal = normalizeGoal(goalId, goalSnapshot.data());
+          const allocationData = allocationSnapshot.data() as { incomeAllocations?: Record<string, number> } | undefined;
+          const incomeAllocations = { ...(allocationData?.incomeAllocations ?? {}) };
+          goal.contributions.forEach((contribution) => {
+            if (!contribution.incomeSourceId) return;
+            incomeAllocations[contribution.incomeSourceId] = Math.max(
+              0,
+              (incomeAllocations[contribution.incomeSourceId] ?? 0) - contribution.amount,
+            );
+          });
+          transaction.set(allocationRef, { incomeAllocations }, { merge: true });
+          transaction.delete(goalRef);
+        });
       } catch {
         setGoalsSyncError("Sincronização indisponível; objetivo não excluído.");
         throw new Error("Goal deletion failed");
@@ -366,24 +386,57 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     localStorage.setItem(goalsStorageKey(user?.uid ?? "local"), JSON.stringify(nextGoals));
     setGoalsSyncError("");
   };
-  const contributeToGoal = async (goalId: string, amount: number, date: string) => {
-    const contribution: GoalContribution = { id: crypto.randomUUID(), amount, date };
-    const nextGoals = goals.map((goal) => goal.id === goalId
-      ? { ...goal, saved: goal.saved + amount, contributions: [...goal.contributions, contribution] }
-      : goal);
-    setGoals(nextGoals);
-    localStorage.setItem(goalsStorageKey(user?.uid ?? "local"), JSON.stringify(nextGoals));
-    if (user && db) {
-      try {
-        await updateDoc(doc(db, "users", user.uid, "goals", goalId), {
-          contributions: arrayUnion(contribution),
-          saved: increment(amount),
+  const contributeToGoal = async (goalId: string, amount: number, source: GoalIncomeSource) => {
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("Invalid contribution amount");
+    const contribution: GoalContribution = {
+      id: crypto.randomUUID(),
+      amount,
+      date: dateKey(new Date()),
+      incomeSourceId: source.id,
+      incomeSourceLabel: source.label,
+      incomeSourceDate: source.date,
+    };
+    try {
+      if (user && db) {
+        await runTransaction(db, async (transaction) => {
+          const goalRef = doc(db!, "users", user.uid, "goals", goalId);
+          const allocationRef = sharedStateRef(user);
+          const [goalSnapshot, allocationSnapshot] = await Promise.all([
+            transaction.get(goalRef),
+            transaction.get(allocationRef),
+          ]);
+          if (!goalSnapshot.exists()) throw new Error("Goal not found");
+          const allocationData = allocationSnapshot.data() as { incomeAllocations?: Record<string, number> } | undefined;
+          const incomeAllocations = allocationData?.incomeAllocations ?? {};
+          const allocated = incomeAllocations[source.id] ?? 0;
+          if (amount > source.amount - (source.legacyReserved ?? 0) - allocated + 0.005) {
+            throw new Error("Income source balance exceeded");
+          }
+          transaction.set(allocationRef, {
+            incomeAllocations: { ...incomeAllocations, [source.id]: allocated + amount },
+          }, { merge: true });
+          transaction.update(goalRef, {
+            contributions: arrayUnion(contribution),
+            saved: increment(amount),
+          });
         });
-        setGoalsSyncError("");
-      } catch {
-        setGoalsSyncError("Sincronização indisponível; aporte mantido neste dispositivo.");
-        throw new Error("Goal contribution sync failed");
+      } else {
+        const allocated = goals.reduce((total, goal) => total + goal.contributions
+          .filter((item) => item.incomeSourceId === source.id)
+          .reduce((sum, item) => sum + item.amount, 0), 0);
+        if (amount > source.amount - (source.legacyReserved ?? 0) - allocated + 0.005) {
+          throw new Error("Income source balance exceeded");
+        }
       }
+      const nextGoals = goals.map((goal) => goal.id === goalId
+        ? { ...goal, saved: goal.saved + amount, contributions: [...goal.contributions, contribution] }
+        : goal);
+      setGoals(nextGoals);
+      localStorage.setItem(goalsStorageKey(user?.uid ?? "local"), JSON.stringify(nextGoals));
+      setGoalsSyncError("");
+    } catch {
+      setGoalsSyncError("Aporte não registrado; confira o saldo ou a sincronização.");
+      throw new Error("Goal contribution failed");
     }
   };
   const calendarItems = useMemo(() => {

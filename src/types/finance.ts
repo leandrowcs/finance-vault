@@ -22,6 +22,17 @@ export type GoalContribution = {
   id: string;
   amount: number;
   date: string;
+  incomeSourceId?: string;
+  incomeSourceLabel?: string;
+  incomeSourceDate?: string;
+};
+
+export type GoalIncomeSource = {
+  id: string;
+  label: string;
+  amount: number;
+  date: string;
+  legacyReserved?: number;
 };
 
 export type Goal = {
