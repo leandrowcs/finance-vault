@@ -14,14 +14,12 @@ export function CalendarPage({ calendarMonth, calendarItems, selectedDay, onChan
       <div className="page-heading calendar-heading">
         <div>
           <p className="eyebrow">CALENDÁRIO FINANCEIRO</p>
-          <h1>{monthLabels[calendarMonth.getMonth()]} {calendarMonth.getFullYear()}</h1>
-          <p className="heading-copy">Receitas e contas organizadas por data.</p>
-        </div>
-        <div className="calendar-actions">
-          <div className="calendar-month-actions">
+          <div className="calendar-month-heading">
             <button className="icon-button calendar-nav-button" type="button" aria-label="Mês anterior" title="Mês anterior" onClick={() => onChangeMonth(-1)}><ChevronLeft size={18} /></button>
+            <h1>{monthLabels[calendarMonth.getMonth()]} {calendarMonth.getFullYear()}</h1>
             <button className="icon-button calendar-nav-button" type="button" aria-label="Próximo mês" title="Próximo mês" onClick={() => onChangeMonth(1)}><ChevronRight size={18} /></button>
           </div>
+          <p className="heading-copy">Receitas e contas organizadas por data.</p>
         </div>
       </div>
       <div className="calendar-legend"><span><i className="calendar-dot income" /> Receita</span><span><i className="calendar-dot bill" /> Conta a pagar</span></div>

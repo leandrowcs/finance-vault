@@ -16,17 +16,23 @@
   margin: 0 auto;
 }
 .calendar-heading {
+  display: block;
   margin-bottom: 18px;
 }
-.calendar-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
+.calendar-heading > div {
+  width: 100%;
+  text-align: center;
 }
-.calendar-month-actions {
-  display: flex;
+.calendar-month-heading {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  align-items: center;
   gap: 8px;
+}
+.calendar-month-heading h1 {
+  min-width: 0;
+  margin: 0;
+  text-align: center;
 }
 .calendar-back-button {
   align-self: flex-start;
@@ -181,18 +187,6 @@
   }
   .calendar-heading {
     display: block;
-  }
-  .calendar-actions {
-    margin-top: 10px;
-    align-items: stretch;
-  }
-  .calendar-actions .outline-button {
-    width: 100%;
-    justify-content: center;
-  }
-  .calendar-actions .calendar-back-button {
-    width: auto;
-    align-self: flex-start;
   }
   .calendar-day {
     min-height: 68px;
