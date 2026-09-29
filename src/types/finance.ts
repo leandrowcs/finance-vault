@@ -25,6 +25,7 @@ export type GoalContribution = {
   incomeSourceId?: string;
   incomeSourceLabel?: string;
   incomeSourceDate?: string;
+  incomeSourceOwner?: Movement["owner"];
 };
 
 export type GoalIncomeSource = {
@@ -32,6 +33,7 @@ export type GoalIncomeSource = {
   label: string;
   amount: number;
   date: string;
+  owner: Movement["owner"];
   legacyReserved?: number;
 };
 

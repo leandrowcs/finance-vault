@@ -387,7 +387,16 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     setGoalsSyncError("");
   };
   const contributeToGoal = async (goalId: string, amount: number, source: GoalIncomeSource) => {
-    if (!Number.isFinite(amount) || amount <= 0) throw new Error("Invalid contribution amount");
+    const currentDateKey = dateKey(new Date());
+    const currentMonthKey = currentDateKey.slice(0, 7);
+    if (
+      !Number.isFinite(amount) ||
+      amount <= 0 ||
+      !source.date.startsWith(currentMonthKey) ||
+      source.date > currentDateKey
+    ) {
+      throw new Error("Invalid contribution source");
+    }
     const contribution: GoalContribution = {
       id: crypto.randomUUID(),
       amount,
@@ -395,6 +404,7 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       incomeSourceId: source.id,
       incomeSourceLabel: source.label,
       incomeSourceDate: source.date,
+      incomeSourceOwner: source.owner,
     };
     try {
       if (user && db) {
