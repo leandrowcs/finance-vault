@@ -68,6 +68,8 @@ type MonthSummary = {
 type DashboardPageProps = {
   movements: Movement[];
   goals: Goal[];
+  canEditData: boolean;
+  canDeleteData: boolean;
   greeting: string;
   openedDateLabel: string;
   daysUntilNextPayment: number;
@@ -141,11 +143,13 @@ function MonthDetailsModal({
   onClose,
   onToggleBill,
   onEdit,
+  canEditData,
 }: {
   month: MonthSummary;
   onClose: () => void;
   onToggleBill: (key: string) => void;
   onEdit: (movement: Movement) => void;
+  canEditData: boolean;
 }) {
   const hasIncome = month.incomeTotal > 0;
   const hasExpenses = month.expenseTotal > 0;
@@ -254,14 +258,16 @@ function MonthDetailsModal({
                             new Date(`${income.date}T12:00:00`),
                           )}
                         </time>
-                        <button
-                          className="entry-edit-button"
-                          type="button"
-                          aria-label={`Editar receita ${income.label}`}
-                          onClick={() => onEdit(income.movement)}
-                        >
-                          <Pencil size={14} />
-                        </button>
+                        {canEditData && (
+                          <button
+                            className="entry-edit-button"
+                            type="button"
+                            aria-label={`Editar receita ${income.label}`}
+                            onClick={() => onEdit(income.movement)}
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        )}
                       </article>
                     ))
                   )}
@@ -396,24 +402,26 @@ function MonthDetailsModal({
                                   </span>
                                 </div>
                                 <div className="month-details-expense-card-actions">
-                                  <button
-                                    className="entry-edit-button"
-                                    type="button"
-                                    aria-label={`Editar despesa ${bill.name}`}
-                                    onClick={() =>
-                                      onEdit({
-                                        id: editKey,
-                                        type: "expense",
-                                        amount: bill.amount,
-                                        date: `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, "0")}-${String(expenseDate.getDate()).padStart(2, "0")}`,
-                                        description: bill.name,
-                                        category: bill.category,
-                                        owner: bill.owner,
-                                      })
-                                    }
-                                  >
-                                    <Pencil size={14} />
-                                  </button>
+                                  {canEditData && (
+                                    <button
+                                      className="entry-edit-button"
+                                      type="button"
+                                      aria-label={`Editar despesa ${bill.name}`}
+                                      onClick={() =>
+                                        onEdit({
+                                          id: editKey,
+                                          type: "expense",
+                                          amount: bill.amount,
+                                          date: `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, "0")}-${String(expenseDate.getDate()).padStart(2, "0")}`,
+                                          description: bill.name,
+                                          category: bill.category,
+                                          owner: bill.owner,
+                                        })
+                                      }
+                                    >
+                                      <Pencil size={14} />
+                                    </button>
+                                  )}
                                   <button
                                     className={
                                       bill.paid
@@ -421,6 +429,7 @@ function MonthDetailsModal({
                                         : "check-control"
                                     }
                                     type="button"
+                                    disabled={!canEditData}
                                     aria-label={
                                       bill.paid
                                         ? `Desmarcar ${bill.name}`
@@ -524,6 +533,8 @@ function MonthDetailsModal({
 export function DashboardPage({
   movements,
   goals,
+  canEditData,
+  canDeleteData,
   greeting,
   openedDateLabel,
   daysUntilNextPayment,
@@ -1078,20 +1089,21 @@ export function DashboardPage({
         <span>Seu dinheiro, no mesmo plano.</span>
         <span>Última sincronização: agora</span>
       </footer>
-      <FloatingActionButton onClick={onOpenMovement} />
+      {canEditData && <FloatingActionButton onClick={onOpenMovement} />}
       {selectedMonth && (
         <MonthDetailsModal
           month={selectedMonth}
           onClose={() => setSelectedMonthKey(null)}
           onToggleBill={onToggleBill}
           onEdit={setEditingMovement}
+          canEditData={canEditData}
         />
       )}
-      {editingMovement && (
+      {canEditData && editingMovement && (
         <MovementModal
           initialMovement={editingMovement}
           onClose={() => setEditingMovement(null)}
-          onDelete={() => {
+          onDelete={canDeleteData ? () => {
             const movementId = editingMovement.id;
             if (movementId.startsWith("period-income:") || movementId.startsWith("period-expense:")) {
               updateEntryOverrides((current) => ({ ...current, [movementId]: { deleted: true } }));
@@ -1107,7 +1119,7 @@ export function DashboardPage({
               return next;
             });
             setEditingMovement(null);
-          }}
+          } : undefined}
           onSubmit={(movement) => {
             const resolvedMovementId = movement.id.startsWith("movement:") ? movement.id.replace("movement:", "") : movement.id;
             const overrideKey = movement.id.startsWith("period-income:") || movement.id.startsWith("period-expense:")

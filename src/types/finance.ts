@@ -45,6 +45,22 @@ export type Goal = {
   contributions: GoalContribution[];
 };
 
+export type MemberAccessLevel = "read" | "edit" | "delete" | "owner";
+
+export type HouseholdMember = {
+  uid: string;
+  email: string;
+  displayName: string;
+  accessLevel: MemberAccessLevel;
+};
+
+export type HouseholdInvite = {
+  id: string;
+  email: string;
+  accessLevel: Exclude<MemberAccessLevel, "owner">;
+  status: "pending" | "accepted";
+};
+
 export type CalendarItem = {
   type: "income" | "bill";
   title: string;

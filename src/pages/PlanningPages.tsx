@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
 import { financePeriods } from "../data/financeSeed";
 import { currency, dateKey, dueDate } from "../lib/finance";
-import type { Goal, GoalIncomeSource, Movement } from "../types/finance";
+import type { Goal, GoalIncomeSource, HouseholdInvite, HouseholdMember, MemberAccessLevel, Movement } from "../types/finance";
 
 type EntryOverride = Partial<Movement> & { deleted?: boolean };
 type EntryOverrides = Record<string, EntryOverride>;
@@ -19,10 +19,21 @@ type PlanningPageProps = {
   isBillPaid: (key: string) => boolean;
   sharedEntryOverrides?: EntryOverrides;
   goals?: Goal[];
+  canEditData?: boolean;
+  canDeleteData?: boolean;
   goalsSyncError?: string;
   onCreateGoal?: (goal: Goal) => Promise<void>;
   onDeleteGoal?: (goalId: string) => Promise<void>;
   onContributeGoal?: (goalId: string, amount: number, source: GoalIncomeSource) => Promise<void>;
+  householdId?: string;
+  householdError?: string;
+  accessLevel?: MemberAccessLevel;
+  members?: HouseholdMember[];
+  invites?: HouseholdInvite[];
+  onCreateInvite?: (email: string, accessLevel: Exclude<MemberAccessLevel, "owner">) => Promise<string>;
+  onUpdateMemberAccess?: (memberId: string, accessLevel: Exclude<MemberAccessLevel, "owner">) => Promise<void>;
+  onRemoveMember?: (memberId: string) => Promise<void>;
+  onRevokeInvite?: (inviteId: string) => Promise<void>;
 };
 
 type ItemKind = "manual" | "planned";
@@ -193,7 +204,7 @@ function EmptySection({ message }: { message: string }) {
   return <div className="empty-state wide">{message}</div>;
 }
 
-function BillsList({ items, onToggleBill, isBillPaid }: { items: BillListItem[]; onToggleBill: (key: string) => void; isBillPaid: (key: string) => boolean }) {
+function BillsList({ items, onToggleBill, isBillPaid, canEditData = true }: { items: BillListItem[]; onToggleBill: (key: string) => void; isBillPaid: (key: string) => boolean; canEditData?: boolean }) {
   if (items.length === 0) return <EmptySection message="Nenhuma conta nesta seção." />;
 
   return (
@@ -212,6 +223,7 @@ function BillsList({ items, onToggleBill, isBillPaid }: { items: BillListItem[];
             <button
               className={paid ? "check-control checked" : "check-control"}
               type="button"
+              disabled={!canEditData}
               aria-label={paid ? `Desmarcar ${item.title}` : `Marcar ${item.title} como paga`}
               onClick={() => onToggleBill(item.toggleKey)}
             >
@@ -244,7 +256,7 @@ function IncomeList({ items }: { items: IncomeListItem[] }) {
   );
 }
 
-export function BillsPage({ movements, onToggleBill, isBillPaid, sharedEntryOverrides = {} }: PlanningPageProps) {
+export function BillsPage({ movements, onToggleBill, isBillPaid, sharedEntryOverrides = {}, canEditData = true }: PlanningPageProps) {
   const monthGroups = useMemo(() => {
     const plannedItems: BillListItem[] = financePeriods.flatMap((period) =>
       period.bills.flatMap((bill) => {
@@ -314,14 +326,14 @@ export function BillsPage({ movements, onToggleBill, isBillPaid, sharedEntryOver
                 copy="Movimentos manuais com tipo Despesa."
                 count={manualItems.length}
               >
-                <BillsList items={manualItems} onToggleBill={onToggleBill} isBillPaid={isBillPaid} />
+                <BillsList items={manualItems} onToggleBill={onToggleBill} isBillPaid={isBillPaid} canEditData={canEditData} />
               </SectionBlock>
               <SectionBlock
                 title="Contas planejadas"
                 copy="Contas cadastradas nos períodos financeiros; o vencimento define a data."
                 count={plannedItems.length}
               >
-                <BillsList items={plannedItems} onToggleBill={onToggleBill} isBillPaid={isBillPaid} />
+                <BillsList items={plannedItems} onToggleBill={onToggleBill} isBillPaid={isBillPaid} canEditData={canEditData} />
               </SectionBlock>
             </MonthAccordion>
           );
@@ -429,67 +441,137 @@ export function IncomePage({ movements, sharedEntryOverrides = {} }: PlanningPag
   );
 }
 
-export function GoalsPage({ movements, sharedEntryOverrides = {}, goals = [], goalsSyncError = "", onCreateGoal, onDeleteGoal, onContributeGoal }: PlanningPageProps) {
+export function GoalsPage({ movements, user, displayName, sharedEntryOverrides = {}, goals = [], goalsSyncError = "", onCreateGoal, onDeleteGoal, onContributeGoal }: PlanningPageProps) {
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
   const [contributionAmounts, setContributionAmounts] = useState<Record<string, string>>({});
   const [contributionOwners, setContributionOwners] = useState<Record<string, string>>({});
-  const [contributionSources, setContributionSources] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const currentDateKey = dateKey(new Date());
   const currentMonthKey = currentDateKey.slice(0, 7);
-  const incomeSources = useMemo(() => {
-    const manualSources: GoalIncomeSource[] = movements
+  const currentMonthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date());
+  const ownerLabels = useMemo(() => {
+    const wifeIsLoggedIn = `${user?.email ?? ""} ${user?.displayName ?? ""}`.toLowerCase().includes("ketlin");
+    return {
+      "Você": wifeIsLoggedIn ? "Leandro" : displayName,
+      "Esposa": wifeIsLoggedIn ? displayName : "Ketlin",
+    };
+  }, [displayName, user?.displayName, user?.email]);
+  const { monthlyBalances, hasUnassignedContributions } = useMemo(() => {
+    const monthMovements = movements
       .map((movement) => ({ ...movement, ...sharedEntryOverrides[`movement:${movement.id}`] }))
-      .filter((movement) =>
-        !movement.deleted &&
-        movement.type === "income" &&
-        movement.date.startsWith(currentMonthKey) &&
-        movement.date <= currentDateKey,
-      )
+      .filter((movement) => !movement.deleted && movement.date.startsWith(currentMonthKey));
+    const manualReceivedSources = monthMovements
+      .filter((movement) => movement.type === "income" && movement.date <= currentDateKey && movement.owner !== "Compartilhado")
       .map((movement) => ({
         id: movement.id,
-        label: movement.description || "Receita manual",
-        amount: movement.amount,
+        owner: movement.owner as "Você" | "Esposa",
         date: movement.date,
-        owner: movement.owner,
+        amount: movement.amount,
       }));
-    return manualSources
-      .filter((source) => Number.isFinite(source.amount) && source.amount > 0)
-      .sort((left, right) => left.date.localeCompare(right.date) || left.label.localeCompare(right.label));
-  }, [currentDateKey, currentMonthKey, movements, sharedEntryOverrides]);
-  const availableIncomeSources = useMemo(() => {
-    const allocatedBySource = new Map<string, number>();
-    const unassignedContributions = goals.reduce((total, goal) => total + goal.contributions
-      .filter((contribution) => !contribution.incomeSourceId && contribution.date.startsWith(currentMonthKey))
-      .reduce((sum, contribution) => sum + contribution.amount, 0), 0);
-    goals.forEach((goal) => goal.contributions.forEach((contribution) => {
-      if (contribution.incomeSourceId) {
-        allocatedBySource.set(
-          contribution.incomeSourceId,
-          (allocatedBySource.get(contribution.incomeSourceId) ?? 0) + contribution.amount,
-        );
+    const plannedReceivedSources = financePeriods
+      .filter((period) => period.date.startsWith(currentMonthKey))
+      .flatMap((period) => ([
+        {
+          id: `period-income:${period.date}:leandro`,
+          owner: "Você" as const,
+          amount: sharedEntryOverrides[`period-income:${period.date}:leandro`]?.amount ?? period.income.leandro,
+          date: sharedEntryOverrides[`period-income:${period.date}:leandro`]?.date ?? period.date,
+          deleted: sharedEntryOverrides[`period-income:${period.date}:leandro`]?.deleted,
+        },
+        {
+          id: `period-income:${period.date}:ketlin`,
+          owner: "Esposa" as const,
+          amount: sharedEntryOverrides[`period-income:${period.date}:ketlin`]?.amount ?? period.income.ketlin,
+          date: sharedEntryOverrides[`period-income:${period.date}:ketlin`]?.date ?? period.date,
+          deleted: sharedEntryOverrides[`period-income:${period.date}:ketlin`]?.deleted,
+        },
+      ]).filter((source) => !source.deleted && source.date.startsWith(currentMonthKey) && source.date <= currentDateKey)
+        .map(({ deleted: _deleted, ...source }) => source));
+    const receivedSources = [...plannedReceivedSources, ...manualReceivedSources];
+    const receivedByOwner = receivedSources.reduce<Record<"Você" | "Esposa", number>>(
+      (totals, source) => ({ ...totals, [source.owner]: totals[source.owner] + source.amount }),
+      { "Você": 0, "Esposa": 0 },
+    );
+    const sharedIncome = monthMovements
+      .filter((movement) => movement.type === "income" && movement.owner === "Compartilhado" && movement.date <= currentDateKey)
+      .reduce((total, movement) => total + movement.amount / 2, 0);
+    receivedByOwner["Você"] += sharedIncome;
+    receivedByOwner.Esposa += sharedIncome;
+    const addExpense = (totals: Record<"Você" | "Esposa", number>, owner: Movement["owner"], amount: number) => {
+      if (owner === "Compartilhado") {
+        return { "Você": totals["Você"] + amount / 2, "Esposa": totals.Esposa + amount / 2 };
       }
-    }));
-    return incomeSources.reduce<{
-      legacyRemaining: number;
-      sources: (GoalIncomeSource & { available: number })[];
-    }>((state, source) => {
-      const availableBeforeLegacy = Math.max(0, source.amount - (allocatedBySource.get(source.id) ?? 0));
-      const legacyReserved = Math.min(state.legacyRemaining, availableBeforeLegacy);
+      return { ...totals, [owner]: totals[owner] + amount };
+    };
+    const movementExpenses = monthMovements
+      .filter((movement) => movement.type === "expense")
+      .reduce((totals, movement) => addExpense(totals, movement.owner, movement.amount), { "Você": 0, "Esposa": 0 });
+    const plannedExpenses = financePeriods
+      .filter((period) => period.date.startsWith(currentMonthKey))
+      .flatMap((period) => period.bills.flatMap((bill) => {
+        const override = sharedEntryOverrides[`period-expense:${period.date}:${bill.id}`];
+        if (override?.deleted) return [];
+        const date = override?.date ?? dateKey(dueDate(period.date, bill.due));
+        if (!date.startsWith(currentMonthKey)) return [];
+        return [{ owner: override?.owner ?? bill.owner, amount: override?.amount ?? bill.amount }];
+      }));
+    const expenseByOwner = plannedExpenses.reduce(
+      (totals, expense) => addExpense(totals, expense.owner, expense.amount),
+      movementExpenses,
+    );
+    const sourceOwnerById = new Map(receivedSources.map((source) => [source.id, source.owner]));
+    const contributions = goals.flatMap((goal) => goal.contributions).filter((contribution) =>
+      (contribution.incomeSourceDate ?? contribution.date).startsWith(currentMonthKey),
+    );
+    const ownerForContribution = (contribution: Goal["contributions"][number]) =>
+      contribution.incomeSourceOwner ?? (contribution.incomeSourceId ? sourceOwnerById.get(contribution.incomeSourceId) : undefined);
+    const unassignedContributions = contributions.filter((contribution) => !ownerForContribution(contribution));
+    const ownerOrder = (["Você", "Esposa"] as const).slice().sort((left, right) => {
+      const firstLeftIncome = receivedSources.find((source) => source.owner === left)?.date ?? "9999-12-31";
+      const firstRightIncome = receivedSources.find((source) => source.owner === right)?.date ?? "9999-12-31";
+      return firstLeftIncome.localeCompare(firstRightIncome);
+    });
+    const legacyReservations = ownerOrder.reduce<{
+      remaining: number;
+      byOwner: Record<"Você" | "Esposa", number>;
+    }>((state, owner) => {
+      const balance = Math.max(0, receivedByOwner[owner] - expenseByOwner[owner]);
+      const reserved = Math.min(state.remaining, balance);
       return {
-        legacyRemaining: state.legacyRemaining - legacyReserved,
-        sources: [...state.sources, {
-          ...source,
-          legacyReserved,
-          available: availableBeforeLegacy - legacyReserved,
-        }],
+        remaining: state.remaining - reserved,
+        byOwner: { ...state.byOwner, [owner]: reserved },
       };
-    }, { legacyRemaining: unassignedContributions, sources: [] }).sources;
-  }, [currentMonthKey, goals, incomeSources]);
-  const hasUnassignedContributions = goals.some((goal) =>
-    goal.contributions.some((contribution) => !contribution.incomeSourceId && contribution.date.startsWith(currentMonthKey)),
-  );
+    }, {
+      remaining: unassignedContributions.reduce((total, contribution) => total + contribution.amount, 0),
+      byOwner: { "Você": 0, "Esposa": 0 },
+    });
+    const monthlyBalances = (["Você", "Esposa"] as const).map((owner) => {
+      const id = `income-balance:${owner}:${currentMonthKey}`;
+      const ownerContributions = contributions.filter((contribution) => ownerForContribution(contribution) === owner);
+      const currentBalanceAllocations = ownerContributions
+        .filter((contribution) => contribution.incomeSourceId === id)
+        .reduce((total, contribution) => total + contribution.amount, 0);
+      const previousAllocations = ownerContributions
+        .filter((contribution) => contribution.incomeSourceId !== id)
+        .reduce((total, contribution) => total + contribution.amount, 0);
+      const amount = Math.max(0, receivedByOwner[owner] - expenseByOwner[owner]);
+      const legacyReserved = previousAllocations + legacyReservations.byOwner[owner];
+      return {
+        id,
+        label: `${ownerLabels[owner]} · saldo de ${currentMonthLabel}`,
+        amount,
+        date: currentDateKey,
+        owner,
+        receivedAmount: receivedByOwner[owner],
+        expenseAmount: expenseByOwner[owner],
+        allocatedAmount: currentBalanceAllocations + previousAllocations + legacyReservations.byOwner[owner],
+        legacyReserved,
+        available: Math.max(0, amount - legacyReserved - currentBalanceAllocations),
+      };
+    });
+    return { monthlyBalances, hasUnassignedContributions: unassignedContributions.length > 0 };
+  }, [currentDateKey, currentMonthKey, currentMonthLabel, goals, movements, ownerLabels, sharedEntryOverrides]);
 
   const addGoal = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -508,12 +590,10 @@ export function GoalsPage({ movements, sharedEntryOverrides = {}, goals = [], go
   const addContribution = async (event: React.FormEvent<HTMLFormElement>, goal: Goal) => {
     event.preventDefault();
     const amount = Number(contributionAmounts[goal.id]);
-    const source = availableIncomeSources.find((item) =>
-      item.id === contributionSources[goal.id] && item.owner === contributionOwners[goal.id],
-    );
+    const source = monthlyBalances.find((item) => item.owner === contributionOwners[goal.id]);
     if (!Number.isFinite(amount) || amount <= 0 || !source || !onContributeGoal) return;
     if (amount > source.available + 0.005) {
-      setError("Aporte maior que o saldo disponível dessa receita.");
+      setError("Aporte maior que o saldo livre deste mês.");
       return;
     }
     setError("");
@@ -536,7 +616,7 @@ export function GoalsPage({ movements, sharedEntryOverrides = {}, goals = [], go
   };
 
   return (
-    <PageFrame eyebrow="PLANEJAMENTO" title="Objetivos" copy="Aportes usam apenas receitas manuais recebidas neste mês e ficam vinculados ao objetivo da sua conta.">
+    <PageFrame eyebrow="PLANEJAMENTO" title="Objetivos" copy="O saldo mensal considera receitas já recebidas menos despesas registradas e contas previstas.">
       <form className="goal-form" onSubmit={addGoal}>
         <label>
           <span>Nome</span>
@@ -572,6 +652,8 @@ export function GoalsPage({ movements, sharedEntryOverrides = {}, goals = [], go
         ) : (
           goals.map((goal) => {
             const progress = Math.min(100, (goal.saved / goal.target) * 100);
+            const selectedOwner = contributionOwners[goal.id];
+            const monthlyBalance = monthlyBalances.find((balance) => balance.owner === selectedOwner);
             return (
               <article className="goal-card" key={goal.id}>
                 <div className="goal-card-heading">
@@ -581,14 +663,14 @@ export function GoalsPage({ movements, sharedEntryOverrides = {}, goals = [], go
                       {currency.format(goal.saved)} de {currency.format(goal.target)}
                     </small>
                   </div>
-                  <button
+                  {onDeleteGoal && <button
                     className="icon-button"
                     type="button"
                     aria-label={`Excluir objetivo ${goal.name}`}
                     onClick={() => void removeGoal(goal.id)}
                   >
                     <Trash2 size={16} />
-                  </button>
+                  </button>}
                 </div>
                 <div className="goal-progress">
                   <span style={{ width: `${progress}%` }} />
@@ -596,53 +678,39 @@ export function GoalsPage({ movements, sharedEntryOverrides = {}, goals = [], go
                 <small>{Math.round(progress)}% concluído</small>
                 <form className="goal-contribution-form" onSubmit={(event) => void addContribution(event, goal)}>
                   <label>
-                    <span>De quem é a receita?</span>
+                    <span>Quem faz o aporte?</span>
                     <select
-                      aria-label={`Titular da receita para ${goal.name}`}
+                      aria-label={`Titular do aporte para ${goal.name}`}
                       value={contributionOwners[goal.id] ?? ""}
                       onChange={(event) => {
-                        setContributionOwners((current) => ({ ...current, [goal.id]: event.target.value }));
-                        setContributionSources((current) => ({ ...current, [goal.id]: "" }));
+                        setContributionOwners((current) => ({ ...current, [goal.id]: event.target.value as Movement["owner"] | "" }));
                         setContributionAmounts((current) => ({ ...current, [goal.id]: "" }));
                       }}
                       required
                     >
                       <option value="">Selecione a pessoa</option>
-                      <option value="Você">Eu</option>
-                      <option value="Esposa">Minha esposa</option>
+                      <option value="Você">{ownerLabels["Você"]}</option>
+                      <option value="Esposa">{ownerLabels.Esposa}</option>
                     </select>
                   </label>
-                  <label>
-                    <span>Receita recebida neste mês</span>
-                    <select
-                      aria-label={`Receita de origem do aporte para ${goal.name}`}
-                      value={contributionSources[goal.id] ?? ""}
-                      onChange={(event) => {
-                        setContributionSources((current) => ({ ...current, [goal.id]: event.target.value }));
-                        setContributionAmounts((current) => ({ ...current, [goal.id]: "" }));
-                      }}
-                      disabled={!contributionOwners[goal.id]}
-                      required
-                    >
-                      <option value="">{contributionOwners[goal.id] ? "Selecione uma receita" : "Selecione a pessoa primeiro"}</option>
-                      {availableIncomeSources
-                        .filter((source) => source.owner === contributionOwners[goal.id] && source.available > 0)
-                        .slice()
-                        .reverse()
-                        .map((source) => (
-                        <option value={source.id} key={source.id}>
-                          {formatDate(source.date)} · {source.label} · {currency.format(source.available)} disponível
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  {monthlyBalance && (
+                    <div className="goal-month-balance" aria-live="polite">
+                      <p><span>Recebido no mês</span><strong>{currency.format(monthlyBalance.receivedAmount ?? 0)}</strong></p>
+                      <p><span>Despesas e contas</span><strong>{currency.format(monthlyBalance.expenseAmount ?? 0)}</strong></p>
+                      <p><span>Já destinado</span><strong>{currency.format(monthlyBalance.allocatedAmount ?? 0)}</strong></p>
+                      <p><span>Disponível para objetivos</span><strong>{currency.format(monthlyBalance.available)}</strong></p>
+                    </div>
+                  )}
+                  {selectedOwner && monthlyBalance?.receivedAmount === 0 && (
+                    <p className="goal-source-notice">Nenhuma receita recebida por {ownerLabels[selectedOwner as "Você" | "Esposa"]} neste mês.</p>
+                  )}
                   <label>
                     <span>Aporte</span>
                     <input
                       aria-label={`Valor do aporte para ${goal.name}`}
                       type="number"
                       min="0.01"
-                      max={availableIncomeSources.find((source) => source.id === contributionSources[goal.id] && source.owner === contributionOwners[goal.id])?.available ?? undefined}
+                      max={monthlyBalance?.available ?? undefined}
                       step="0.01"
                       value={contributionAmounts[goal.id] ?? ""}
                       onChange={(event) => setContributionAmounts((current) => ({ ...current, [goal.id]: event.target.value }))}
@@ -650,7 +718,7 @@ export function GoalsPage({ movements, sharedEntryOverrides = {}, goals = [], go
                       required
                     />
                   </label>
-                  <button className="outline-button" type="submit" disabled={!onContributeGoal || !availableIncomeSources.some((source) => source.id === contributionSources[goal.id] && source.owner === contributionOwners[goal.id] && source.available > 0)}>Registrar aporte</button>
+                  <button className="outline-button" type="submit" disabled={!onContributeGoal || !monthlyBalance || monthlyBalance.available <= 0}>Registrar aporte</button>
                 </form>
                 {goal.contributions.length > 0 && (
                   <div className="goal-contribution-history">
@@ -670,18 +738,118 @@ export function GoalsPage({ movements, sharedEntryOverrides = {}, goals = [], go
   );
 }
 
-export function MembersPage({ user, displayName, initials }: PlanningPageProps) {
+export function MembersPage({
+  user,
+  displayName,
+  initials,
+  householdId,
+  householdError = "",
+  accessLevel = "owner",
+  members = [],
+  invites = [],
+  onCreateInvite,
+  onUpdateMemberAccess,
+  onRemoveMember,
+  onRevokeInvite,
+}: PlanningPageProps) {
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteAccess, setInviteAccess] = useState<Exclude<MemberAccessLevel, "owner">>("read");
+  const [error, setError] = useState("");
+  const isOwner = accessLevel === "owner";
+  const sendInvite = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!onCreateInvite) return;
+    setError("");
+    try {
+      const inviteUrl = await onCreateInvite(inviteEmail.trim().toLowerCase(), inviteAccess);
+      const accessLabel = inviteAccess === "read" ? "Leitura" : inviteAccess === "edit" ? "Edição" : "Edição e exclusão";
+      const subject = encodeURIComponent("Convite para o FinanceVault");
+      const body = encodeURIComponent(`${displayName} convidou você para compartilhar o FinanceVault (${accessLabel}).\n\nAceite o convite: ${inviteUrl}`);
+      window.location.href = `mailto:${encodeURIComponent(inviteEmail.trim())}?subject=${subject}&body=${body}`;
+      setInviteEmail("");
+    } catch {
+      setError("Não foi possível criar o convite.");
+    }
+  };
+  const updateAccess = async (memberId: string, level: Exclude<MemberAccessLevel, "owner">) => {
+    if (!onUpdateMemberAccess) return;
+    setError("");
+    try {
+      await onUpdateMemberAccess(memberId, level);
+    } catch {
+      setError("Não foi possível atualizar o acesso.");
+    }
+  };
+  const removeAccess = async (memberId: string) => {
+    if (!onRemoveMember) return;
+    setError("");
+    try {
+      await onRemoveMember(memberId);
+    } catch {
+      setError("Não foi possível remover o membro.");
+    }
+  };
+  const cancelInvite = async (inviteId: string) => {
+    if (!onRevokeInvite) return;
+    setError("");
+    try {
+      await onRevokeInvite(inviteId);
+    } catch {
+      setError("Não foi possível revogar o convite.");
+    }
+  };
+
   return (
-    <PageFrame eyebrow="COLABORAÇÃO" title="Membros" copy="Controle quem participa deste espaço financeiro.">
-      <section className="member-card">
-        <div className="person-avatar leandro">{initials.slice(0, 1)}</div>
-        <div>
-          <strong>{displayName}</strong>
-          <small>{user?.email ?? "Sessão local"}</small>
-        </div>
-        <span className="member-status">Administrador</span>
-      </section>
-      <div className="empty-state wide">Convites e permissões de membros serão adicionados nesta área.</div>
+    <PageFrame eyebrow="COLABORAÇÃO" title="Membros" copy="Convide pessoas e controle o acesso aos dados deste orçamento.">
+      {isOwner && (
+        <form className="member-invite-form" onSubmit={(event) => void sendInvite(event)}>
+          <label>
+            <span>E-mail da pessoa</span>
+            <input type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} required />
+          </label>
+          <label>
+            <span>Acesso</span>
+            <select value={inviteAccess} onChange={(event) => setInviteAccess(event.target.value as Exclude<MemberAccessLevel, "owner">)}>
+              <option value="read">Ler</option>
+              <option value="edit">Ler e editar</option>
+              <option value="delete">Ler, editar e deletar</option>
+            </select>
+          </label>
+          <button className="solid-button" type="submit" disabled={!householdId || !onCreateInvite}>Enviar convite</button>
+        </form>
+      )}
+      {(error || householdError) && <p className="movement-error" role="alert">{error || householdError}</p>}
+      <div className="member-list">
+        {members.length === 0 && user && isOwner && (
+          <section className="member-card">
+            <div className="person-avatar leandro">{initials.slice(0, 1)}</div>
+            <div><strong>{displayName}</strong><small>{user.email ?? "Sessão local"}</small></div>
+            <span className="member-status">Proprietário</span>
+          </section>
+        )}
+        {members.map((member) => (
+          <section className="member-card" key={member.uid}>
+            <div className="person-avatar leandro">{(member.displayName || member.email).slice(0, 1).toUpperCase()}</div>
+            <div><strong>{member.displayName || member.email}</strong><small>{member.email}</small></div>
+            {member.accessLevel === "owner" ? <span className="member-status">Proprietário</span> : isOwner ? (
+              <div className="member-controls">
+                <select aria-label={`Nível de acesso de ${member.displayName || member.email}`} value={member.accessLevel} onChange={(event) => void updateAccess(member.uid, event.target.value as Exclude<MemberAccessLevel, "owner">)}>
+                  <option value="read">Ler</option>
+                  <option value="edit">Ler e editar</option>
+                  <option value="delete">Ler, editar e deletar</option>
+                </select>
+                <button className="entry-delete-button" type="button" aria-label={`Remover ${member.displayName || member.email}`} onClick={() => void removeAccess(member.uid)}><Trash2 size={15} /></button>
+              </div>
+            ) : <span className="member-status">{member.accessLevel === "read" ? "Leitura" : member.accessLevel === "edit" ? "Edição" : "Edição e exclusão"}</span>}
+          </section>
+        ))}
+      </div>
+      {isOwner && invites.filter((invite) => invite.status === "pending").map((invite) => (
+        <section className="member-card pending-invite" key={invite.id}>
+          <div><strong>{invite.email}</strong><small>Convite pendente · {invite.accessLevel === "read" ? "Leitura" : invite.accessLevel === "edit" ? "Edição" : "Edição e exclusão"}</small></div>
+          <button className="entry-delete-button" type="button" aria-label={`Revogar convite para ${invite.email}`} onClick={() => void cancelInvite(invite.id)}><Trash2 size={15} /></button>
+        </section>
+      ))}
     </PageFrame>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
-import { arrayUnion, collection, deleteDoc, doc, increment, onSnapshot, runTransaction, setDoc, updateDoc } from "firebase/firestore";
+import { arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, writeBatch } from "firebase/firestore";
 import { financePeriods, totalIncome } from "./data/financeSeed";
 import { AppNavigation, type NavigationView } from "./components/AppNavigation";
 import { AppTopbar } from "./components/AppTopbar";
@@ -11,11 +11,12 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { BillsPage, GoalsPage, IncomePage, MembersPage, SettingsPage } from "./pages/PlanningPages";
 import { dateKey, dueDate, nextPaymentPeriod } from "./lib/finance";
 import { db } from "./lib/firebase";
-import type { CalendarItem, Goal, GoalContribution, GoalIncomeSource, Movement } from "./types/finance";
+import type { CalendarItem, Goal, GoalContribution, GoalIncomeSource, HouseholdInvite, HouseholdMember, MemberAccessLevel, Movement } from "./types/finance";
 import "./App.css";
 
 type AppProps = { user?: User | null; onSignOut?: () => Promise<void> };
 type EntryOverrides = Record<string, Partial<Movement> & { deleted?: boolean }>;
+type DataUser = Pick<User, "uid"> | null;
 
 const openedAt = new Date();
 const greeting = openedAt.getHours() < 12 ? "Bom dia" : openedAt.getHours() < 18 ? "Boa tarde" : "Boa noite";
@@ -34,19 +35,19 @@ function movementBillKey(movementId: string) {
   return `movement:${movementId}`;
 }
 
-function movementsStorageKey(user: User | null) {
+function movementsStorageKey(user: DataUser) {
   return user ? `financevault:movements:${user.uid}` : "financevault:movements";
 }
 
-function billsStorageKey(user: User | null) {
+function billsStorageKey(user: DataUser) {
   return user ? `financevault:bills:${user.uid}` : "financevault:bills";
 }
 
-function deletedMovementsStorageKey(user: User | null) {
+function deletedMovementsStorageKey(user: DataUser) {
   return user ? `financevault:deleted-movements:${user.uid}` : "financevault:deleted-movements";
 }
 
-function entryOverridesStorageKey(user: User | null) {
+function entryOverridesStorageKey(user: DataUser) {
   return `financevault:entry-overrides:${user?.uid ?? "local"}`;
 }
 
@@ -98,11 +99,11 @@ function normalizeEntryOverrides(overrides: EntryOverrides) {
   }, {});
 }
 
-function sharedStateRef(user: User) {
+function sharedStateRef(user: Pick<User, "uid">) {
   return doc(db!, "users", user.uid, "settings", "shared");
 }
 
-function readStoredMovements(user: User | null) {
+function readStoredMovements(user: DataUser) {
   try {
     const stored = localStorage.getItem(movementsStorageKey(user));
     return stored ? JSON.parse(stored) as Movement[] : [];
@@ -111,7 +112,7 @@ function readStoredMovements(user: User | null) {
   }
 }
 
-function readStoredBillState(user: User | null) {
+function readStoredBillState(user: DataUser) {
   try {
     const stored = localStorage.getItem(billsStorageKey(user));
     return stored ? JSON.parse(stored) as Record<string, boolean> : {};
@@ -120,7 +121,7 @@ function readStoredBillState(user: User | null) {
   }
 }
 
-function readDeletedMovementIds(user: User | null) {
+function readDeletedMovementIds(user: DataUser) {
   try {
     const stored = localStorage.getItem(deletedMovementsStorageKey(user));
     return stored ? new Set(JSON.parse(stored) as string[]) : new Set<string>();
@@ -129,7 +130,7 @@ function readDeletedMovementIds(user: User | null) {
   }
 }
 
-function readStoredEntryOverrides(user: User | null) {
+function readStoredEntryOverrides(user: DataUser) {
   try {
     const stored = localStorage.getItem(entryOverridesStorageKey(user));
     return stored ? normalizeEntryOverrides(JSON.parse(stored) as EntryOverrides) : {};
@@ -183,6 +184,13 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [goalsLoaded, setGoalsLoaded] = useState(false);
   const [goalsSyncError, setGoalsSyncError] = useState("");
+  const [dataOwnerUid, setDataOwnerUid] = useState<string | null>(user?.uid ?? null);
+  const [householdLoaded, setHouseholdLoaded] = useState(!user || !db);
+  const [householdError, setHouseholdError] = useState("");
+  const [accessLevel, setAccessLevel] = useState<MemberAccessLevel>("owner");
+  const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
+  const [householdInvites, setHouseholdInvites] = useState<HouseholdInvite[]>([]);
+  const dataUser: DataUser = dataOwnerUid ? { uid: dataOwnerUid } : null;
   const changeView = (view: NavigationView) => {
     setActiveView(view);
     if (typeof window !== "undefined") window.history.replaceState(null, "", `#${view}`);
@@ -193,44 +201,191 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
   useEffect(() => {
+    if (!user || !db) return;
+    let active = true;
+    const firestore = db;
+    const resolveHousehold = async () => {
+      const inviteParams = new URLSearchParams(window.location.search);
+      const householdId = inviteParams.get("inviteHousehold");
+      const inviteId = inviteParams.get("inviteId");
+      try {
+        if (householdId && inviteId) {
+          const inviteRef = doc(firestore, "households", householdId, "invites", inviteId);
+          const inviteSnapshot = await getDoc(inviteRef);
+          if (!inviteSnapshot.exists()) throw new Error("Invitation not found");
+          const invite = inviteSnapshot.data();
+          const email = user.email?.trim().toLowerCase();
+          const invitedEmail = typeof invite.email === "string" ? invite.email.trim().toLowerCase() : "";
+          const expiresAt = invite.expiresAt?.toDate?.() as Date | undefined;
+          if (!email || email !== invitedEmail) throw new Error("Invitation email mismatch");
+          if (invite.status === "accepted" && invite.acceptedBy === user.uid) {
+            const memberSnapshot = await getDoc(doc(firestore, "households", householdId, "members", user.uid));
+            if (!memberSnapshot.exists()) throw new Error("Membership revoked");
+            setAccessLevel(memberSnapshot.data().accessLevel as MemberAccessLevel);
+          } else {
+            if (invite.status !== "pending" || !expiresAt || expiresAt <= new Date()) {
+              throw new Error("Invitation expired");
+            }
+            const access = invite.accessLevel as Exclude<MemberAccessLevel, "owner">;
+            const batch = writeBatch(firestore);
+            batch.update(inviteRef, { status: "accepted", acceptedBy: user.uid, acceptedAt: serverTimestamp() });
+            batch.set(doc(firestore, "households", householdId, "members", user.uid), {
+              uid: user.uid,
+              email,
+              displayName: user.displayName ?? email,
+              accessLevel: access,
+              inviteId,
+              joinedAt: serverTimestamp(),
+            });
+            batch.set(doc(firestore, "users", user.uid, "memberships", householdId), {
+              ownerUid: householdId,
+              accessLevel: access,
+            });
+            await batch.commit();
+            setAccessLevel(access);
+          }
+          setDataOwnerUid(householdId);
+          setActiveView("members");
+          const cleanUrl = new URL(window.location.href);
+          cleanUrl.searchParams.delete("inviteHousehold");
+          cleanUrl.searchParams.delete("inviteId");
+          window.history.replaceState(null, "", `${cleanUrl.pathname}${cleanUrl.search}#members`);
+        } else {
+          const memberships = await getDocs(collection(firestore, "users", user.uid, "memberships"));
+          const membership = memberships.docs.find((item) => item.data().ownerUid !== user.uid) ?? memberships.docs[0];
+          if (membership) {
+            const data = membership.data();
+            setDataOwnerUid(typeof data.ownerUid === "string" ? data.ownerUid : membership.id);
+            setAccessLevel(data.accessLevel as MemberAccessLevel);
+          } else {
+            const batch = writeBatch(firestore);
+            batch.set(doc(firestore, "households", user.uid), {
+              ownerUid: user.uid,
+              createdAt: serverTimestamp(),
+            }, { merge: true });
+            batch.set(doc(firestore, "households", user.uid, "members", user.uid), {
+              uid: user.uid,
+              email: user.email ?? "",
+              displayName: user.displayName ?? user.email ?? "Proprietário",
+              accessLevel: "owner",
+              joinedAt: serverTimestamp(),
+            }, { merge: true });
+            batch.set(doc(firestore, "users", user.uid, "memberships", user.uid), {
+              ownerUid: user.uid,
+              accessLevel: "owner",
+            }, { merge: true });
+            await batch.commit();
+            setDataOwnerUid(user.uid);
+            setAccessLevel("owner");
+          }
+        }
+      } catch {
+        if (!active) return;
+        setDataOwnerUid(user.uid);
+        setAccessLevel("read");
+        setHouseholdError("Não foi possível validar o convite ou carregar os membros. Publique as regras do Firestore e tente novamente.");
+        if (householdId && inviteId) setActiveView("members");
+      } finally {
+        if (active) setHouseholdLoaded(true);
+      }
+    };
+    void resolveHousehold();
+    return () => {
+      active = false;
+    };
+  }, [user]);
+  useEffect(() => {
+    if (!user || !db || !householdLoaded || !dataOwnerUid) return;
+    const firestore = db;
+    const membersRef = collection(firestore, "households", dataOwnerUid, "members");
+    const unsubscribeMembers = onSnapshot(membersRef, (snapshot) => {
+      setHouseholdMembers(snapshot.docs.map((item) => ({
+        uid: item.id,
+        email: String(item.data().email ?? ""),
+        displayName: String(item.data().displayName ?? item.data().email ?? "Membro"),
+        accessLevel: item.data().accessLevel as MemberAccessLevel,
+      })));
+    }, () => setHouseholdError("Não foi possível carregar os membros."));
+    if (accessLevel !== "owner") return unsubscribeMembers;
+    const unsubscribeInvites = onSnapshot(collection(firestore, "households", dataOwnerUid, "invites"), (snapshot) => {
+      setHouseholdInvites(snapshot.docs.map((item) => ({
+        id: item.id,
+        email: String(item.data().email ?? ""),
+        accessLevel: item.data().accessLevel as Exclude<MemberAccessLevel, "owner">,
+        status: item.data().status as HouseholdInvite["status"],
+      })));
+    }, () => setHouseholdError("Não foi possível carregar os convites."));
+    return () => {
+      unsubscribeMembers();
+      unsubscribeInvites();
+    };
+  }, [accessLevel, dataOwnerUid, householdLoaded, user]);
+  useEffect(() => {
+    if (!user || !db || !householdLoaded || !dataOwnerUid || dataOwnerUid === user.uid) return;
+    const firestore = db;
+    const membershipRef = doc(firestore, "users", user.uid, "memberships", dataOwnerUid);
+    const revokeAccess = () => {
+      setDataOwnerUid(user.uid);
+      setAccessLevel("read");
+      setHouseholdMembers([]);
+      setHouseholdInvites([]);
+      setMovements([]);
+      setGoals([]);
+      setHouseholdError("Seu acesso a este orçamento foi removido.");
+      setActiveView("members");
+    };
+    return onSnapshot(membershipRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        revokeAccess();
+        return;
+      }
+      setAccessLevel(snapshot.data().accessLevel as MemberAccessLevel);
+    }, revokeAccess);
+  }, [dataOwnerUid, householdLoaded, user]);
+  useEffect(() => {
+    if (!householdLoaded) return;
+    const activeDataUser: DataUser = dataOwnerUid ? { uid: dataOwnerUid } : null;
     setMovementsLoaded(false);
-    const storedEntryOverrides = readStoredEntryOverrides(user);
+    const storedEntryOverrides = readStoredEntryOverrides(activeDataUser);
     setEntryOverrides(storedEntryOverrides);
-    localStorage.setItem(entryOverridesStorageKey(user), JSON.stringify(storedEntryOverrides));
-    const storedMovements = readStoredMovements(user);
+    localStorage.setItem(entryOverridesStorageKey(activeDataUser), JSON.stringify(storedEntryOverrides));
+    const storedMovements = readStoredMovements(activeDataUser);
     setMovements(storedMovements);
-    if (user && db) {
-      const unsubscribeMovements = onSnapshot(collection(db, "users", user.uid, "movements"), (snapshot) => {
-        const deletedMovementIds = readDeletedMovementIds(user);
+    setBillPaidState({ ...Object.fromEntries(financePeriods.flatMap((period) => period.bills.map((bill) => [periodBillKey(period.date, bill.id), bill.paid]))), ...readStoredBillState(activeDataUser) });
+    if (activeDataUser && db) {
+      const ownerUid = activeDataUser.uid;
+      const unsubscribeMovements = onSnapshot(collection(db, "users", ownerUid, "movements"), (snapshot) => {
+        const deletedMovementIds = readDeletedMovementIds(activeDataUser);
         const remoteMovements = snapshot.docs
           .map((item) => item.data() as Movement)
           .filter((movement) => !deletedMovementIds.has(movement.id));
-        const movementsById = new Map(remoteMovements.map((movement) => [movement.id, movement]));
+        const movementsById = new Map(remoteMovements.map((item) => [item.id, item]));
         const remoteIds = new Set(movementsById.keys());
-        readStoredMovements(user)
+        readStoredMovements(activeDataUser)
           .filter((movement) => !remoteIds.has(movement.id))
           .forEach((movement) => movementsById.set(movement.id, movement));
         setMovements([...movementsById.values()]);
         setMovementsLoaded(true);
       }, () => setMovementsLoaded(true));
-      const unsubscribeSharedState = onSnapshot(sharedStateRef(user), (snapshot) => {
+      const sharedRef = sharedStateRef(activeDataUser);
+      const unsubscribeSharedState = onSnapshot(sharedRef, (snapshot) => {
         const sharedState = snapshot.data() as { billPaidState?: Record<string, boolean>; entryOverrides?: EntryOverrides } | undefined;
         if (sharedState?.billPaidState) {
           setBillPaidState((current) => ({ ...current, ...sharedState.billPaidState }));
-          localStorage.setItem(billsStorageKey(user), JSON.stringify(sharedState.billPaidState));
+          localStorage.setItem(billsStorageKey(activeDataUser), JSON.stringify(sharedState.billPaidState));
         }
         if (sharedState?.entryOverrides !== undefined) {
           const nextEntryOverrides = normalizeEntryOverrides(sharedState.entryOverrides);
           setEntryOverrides(nextEntryOverrides);
-          localStorage.setItem(entryOverridesStorageKey(user), JSON.stringify(nextEntryOverrides));
+          localStorage.setItem(entryOverridesStorageKey(activeDataUser), JSON.stringify(nextEntryOverrides));
           if (JSON.stringify(nextEntryOverrides) !== JSON.stringify(sharedState.entryOverrides)) {
-            void updateDoc(sharedStateRef(user), { entryOverrides: nextEntryOverrides }).catch(() =>
-              setDoc(sharedStateRef(user), { entryOverrides: nextEntryOverrides }, { merge: true }),
+            void updateDoc(sharedRef, { entryOverrides: nextEntryOverrides }).catch(() =>
+              setDoc(sharedRef, { entryOverrides: nextEntryOverrides }, { merge: true }),
             );
           }
         } else if (snapshot.exists()) {
           setEntryOverrides({});
-          localStorage.setItem(entryOverridesStorageKey(user), JSON.stringify({}));
+          localStorage.setItem(entryOverridesStorageKey(activeDataUser), JSON.stringify({}));
         }
       });
       return () => {
@@ -239,20 +394,23 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       };
     }
     setMovementsLoaded(true);
-  }, [user]);
+  }, [dataOwnerUid, householdLoaded]);
   useEffect(() => {
-    const storageKey = user?.uid ?? "local";
+    if (!householdLoaded) return;
+    const activeDataUser: DataUser = dataOwnerUid ? { uid: dataOwnerUid } : null;
+    const storageKey = dataOwnerUid ?? "local";
     const localGoals = readStoredGoals(storageKey);
     setGoals(localGoals);
     setGoalsLoaded(false);
     setGoalsSyncError("");
-    if (!user || !db) {
+    if (!activeDataUser || !db) {
       setGoalsLoaded(true);
       return;
     }
     let initialSnapshot = true;
     let active = true;
-    const goalsRef = collection(db, "users", user.uid, "goals");
+    const ownerUid = activeDataUser.uid;
+    const goalsRef = collection(db, "users", ownerUid, "goals");
     const unsubscribe = onSnapshot(goalsRef, (snapshot) => {
       const remoteGoals = snapshot.docs.map((item) => normalizeGoal(item.id, item.data()));
       if (initialSnapshot) {
@@ -260,7 +418,7 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
         const remoteById = new Map(remoteGoals.map((goal) => [goal.id, goal]));
         localGoals.forEach((localGoal) => {
           const remoteGoal = remoteById.get(localGoal.id);
-          const goalRef = doc(db!, "users", user.uid, "goals", localGoal.id);
+          const goalRef = doc(db!, "users", ownerUid, "goals", localGoal.id);
           if (!remoteGoal) {
             remoteById.set(localGoal.id, localGoal);
             void setDoc(goalRef, localGoal).catch(() => {
@@ -303,48 +461,54 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       active = false;
       unsubscribe();
     };
-  }, [user]);
+  }, [dataOwnerUid, householdLoaded]);
+  const canEditData = accessLevel !== "read";
+  const canDeleteData = accessLevel === "delete" || accessLevel === "owner";
   const saveMovement = async (movement: Movement) => {
+    if (!canEditData) return;
     const savedMovements = expandRecurringMovement(movement);
     const savedIds = new Set(savedMovements.map((item) => item.id));
     const nextMovements = [...movements.filter((item) => !savedIds.has(item.id) && item.id !== movement.id), ...savedMovements];
     setMovements(nextMovements);
-    localStorage.setItem(movementsStorageKey(user), JSON.stringify(nextMovements));
-    if (user && db) {
-      try { await Promise.all(savedMovements.map((savedMovement) => setDoc(doc(db!, "users", user.uid, "movements", savedMovement.id), savedMovement))); } catch { return; }
+    localStorage.setItem(movementsStorageKey(dataUser), JSON.stringify(nextMovements));
+    if (dataUser && db) {
+      try { await Promise.all(savedMovements.map((savedMovement) => setDoc(doc(db!, "users", dataUser.uid, "movements", savedMovement.id), savedMovement))); } catch { return; }
       return;
     }
   };
   const deleteMovement = async (movementId: string) => {
-    const deletedMovementIds = readDeletedMovementIds(user);
+    if (!canDeleteData) return;
+    const deletedMovementIds = readDeletedMovementIds(dataUser);
     deletedMovementIds.add(movementId);
-    localStorage.setItem(deletedMovementsStorageKey(user), JSON.stringify([...deletedMovementIds]));
+    localStorage.setItem(deletedMovementsStorageKey(dataUser), JSON.stringify([...deletedMovementIds]));
     const nextMovements = movements.filter((movement) => movement.id !== movementId);
     setMovements(nextMovements);
-    localStorage.setItem(movementsStorageKey(user), JSON.stringify(nextMovements));
-    if (user && db) {
-      try { await deleteDoc(doc(db, "users", user.uid, "movements", movementId)); } catch { return; }
+    localStorage.setItem(movementsStorageKey(dataUser), JSON.stringify(nextMovements));
+    if (dataUser && db) {
+      try { await deleteDoc(doc(db, "users", dataUser.uid, "movements", movementId)); } catch { return; }
     }
   };
   const saveEntryOverrides = async (nextEntryOverrides: EntryOverrides) => {
+    if (!canEditData) return;
     const normalizedEntryOverrides = normalizeEntryOverrides(nextEntryOverrides);
     setEntryOverrides(normalizedEntryOverrides);
-    localStorage.setItem(entryOverridesStorageKey(user), JSON.stringify(normalizedEntryOverrides));
-    if (user && db) {
+    localStorage.setItem(entryOverridesStorageKey(dataUser), JSON.stringify(normalizedEntryOverrides));
+    if (dataUser && db) {
       try {
-        await updateDoc(sharedStateRef(user), { entryOverrides: normalizedEntryOverrides });
+        await updateDoc(sharedStateRef(dataUser), { entryOverrides: normalizedEntryOverrides });
       } catch {
-        try { await setDoc(sharedStateRef(user), { entryOverrides: normalizedEntryOverrides }, { merge: true }); } catch { return; }
+        try { await setDoc(sharedStateRef(dataUser), { entryOverrides: normalizedEntryOverrides }, { merge: true }); } catch { return; }
       }
     }
   };
   const saveGoal = async (goal: Goal) => {
+    if (!canEditData) throw new Error("Read-only membership");
     const nextGoals = [...goals.filter((item) => item.id !== goal.id), goal];
     setGoals(nextGoals);
-    localStorage.setItem(goalsStorageKey(user?.uid ?? "local"), JSON.stringify(nextGoals));
-    if (user && db) {
+    localStorage.setItem(goalsStorageKey(dataUser?.uid ?? "local"), JSON.stringify(nextGoals));
+    if (dataUser && db) {
       try {
-        await setDoc(doc(db, "users", user.uid, "goals", goal.id), goal);
+        await setDoc(doc(db, "users", dataUser.uid, "goals", goal.id), goal);
         setGoalsSyncError("");
       } catch {
         setGoalsSyncError("Sincronização indisponível; objetivo mantido neste dispositivo.");
@@ -353,11 +517,12 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     }
   };
   const deleteGoal = async (goalId: string) => {
-    if (user && db) {
+    if (!canDeleteData) throw new Error("Delete permission required");
+    if (dataUser && db) {
       try {
         await runTransaction(db, async (transaction) => {
-          const goalRef = doc(db!, "users", user.uid, "goals", goalId);
-          const allocationRef = sharedStateRef(user);
+          const goalRef = doc(db!, "users", dataUser.uid, "goals", goalId);
+          const allocationRef = sharedStateRef(dataUser);
           const [goalSnapshot, allocationSnapshot] = await Promise.all([
             transaction.get(goalRef),
             transaction.get(allocationRef),
@@ -383,10 +548,11 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     }
     const nextGoals = goals.filter((goal) => goal.id !== goalId);
     setGoals(nextGoals);
-    localStorage.setItem(goalsStorageKey(user?.uid ?? "local"), JSON.stringify(nextGoals));
+    localStorage.setItem(goalsStorageKey(dataUser?.uid ?? "local"), JSON.stringify(nextGoals));
     setGoalsSyncError("");
   };
   const contributeToGoal = async (goalId: string, amount: number, source: GoalIncomeSource) => {
+    if (!canEditData) throw new Error("Edit permission required");
     const currentDateKey = dateKey(new Date());
     const currentMonthKey = currentDateKey.slice(0, 7);
     if (
@@ -407,10 +573,10 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       incomeSourceOwner: source.owner,
     };
     try {
-      if (user && db) {
+      if (dataUser && db) {
         await runTransaction(db, async (transaction) => {
-          const goalRef = doc(db!, "users", user.uid, "goals", goalId);
-          const allocationRef = sharedStateRef(user);
+          const goalRef = doc(db!, "users", dataUser.uid, "goals", goalId);
+          const allocationRef = sharedStateRef(dataUser);
           const [goalSnapshot, allocationSnapshot] = await Promise.all([
             transaction.get(goalRef),
             transaction.get(allocationRef),
@@ -442,12 +608,60 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
         ? { ...goal, saved: goal.saved + amount, contributions: [...goal.contributions, contribution] }
         : goal);
       setGoals(nextGoals);
-      localStorage.setItem(goalsStorageKey(user?.uid ?? "local"), JSON.stringify(nextGoals));
+      localStorage.setItem(goalsStorageKey(dataUser?.uid ?? "local"), JSON.stringify(nextGoals));
       setGoalsSyncError("");
     } catch {
       setGoalsSyncError("Aporte não registrado; confira o saldo ou a sincronização.");
       throw new Error("Goal contribution failed");
     }
+  };
+  const createInvite = async (email: string, inviteAccess: Exclude<MemberAccessLevel, "owner">) => {
+    if (!user || !db || accessLevel !== "owner" || !dataOwnerUid) throw new Error("Only owner can invite members");
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || normalizedEmail === user.email?.trim().toLowerCase()) throw new Error("Invalid invite email");
+    if (
+      householdMembers.some((member) => member.email.trim().toLowerCase() === normalizedEmail) ||
+      householdInvites.some((invite) => invite.status === "pending" && invite.email.trim().toLowerCase() === normalizedEmail)
+    ) {
+      throw new Error("Member or pending invitation already exists");
+    }
+    const inviteId = crypto.randomUUID();
+    const inviteRef = doc(db, "households", dataOwnerUid, "invites", inviteId);
+    await setDoc(inviteRef, {
+      email: normalizedEmail,
+      accessLevel: inviteAccess,
+      status: "pending",
+      createdBy: user.uid,
+      createdAt: serverTimestamp(),
+      expiresAt: Timestamp.fromDate(new Date(Date.now() + 7 * 86400000)),
+    });
+    const inviteUrl = new URL(window.location.href);
+    inviteUrl.searchParams.set("inviteHousehold", dataOwnerUid);
+    inviteUrl.searchParams.set("inviteId", inviteId);
+    inviteUrl.hash = "members";
+    return inviteUrl.toString();
+  };
+  const updateMemberAccess = async (memberId: string, nextAccess: Exclude<MemberAccessLevel, "owner">) => {
+    if (!user || !db || accessLevel !== "owner" || !dataOwnerUid || memberId === dataOwnerUid) {
+      throw new Error("Owner permission required");
+    }
+    const batch = writeBatch(db);
+    batch.update(doc(db, "households", dataOwnerUid, "members", memberId), { accessLevel: nextAccess });
+    batch.update(doc(db, "users", memberId, "memberships", dataOwnerUid), { accessLevel: nextAccess });
+    await batch.commit();
+  };
+  const removeMember = async (memberId: string) => {
+    if (!user || !db || accessLevel !== "owner" || !dataOwnerUid || memberId === dataOwnerUid) {
+      throw new Error("Owner permission required");
+    }
+    const batch = writeBatch(db);
+    batch.delete(doc(db, "households", dataOwnerUid, "members", memberId));
+    batch.delete(doc(db, "users", memberId, "memberships", dataOwnerUid));
+    await batch.commit();
+  };
+  const revokeInvite = async (inviteId: string) => {
+    if (!user || !db || accessLevel !== "owner" || !dataOwnerUid) throw new Error("Owner permission required");
+    await deleteDoc(doc(db, "households", dataOwnerUid, "invites", inviteId));
   };
   const calendarItems = useMemo(() => {
     const items = new Map<string, CalendarItem[]>();
@@ -465,16 +679,51 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const daysUntilNextPayment = Math.max(0, Math.ceil((nextPaymentDate.getTime() - openedAt.getTime()) / 86400000));
   const changeCalendarMonth = (offset: number) => { setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1)); setSelectedDay(null); };
   const toggleBill = (key: string) => setBillPaidState((current) => {
+    if (!canEditData) return current;
     const nextState = { ...current, [key]: !current[key] };
-    localStorage.setItem(billsStorageKey(user), JSON.stringify(nextState));
-    if (user && db) void setDoc(sharedStateRef(user), { billPaidState: nextState }, { merge: true });
+    localStorage.setItem(billsStorageKey(dataUser), JSON.stringify(nextState));
+    if (dataUser && db) void setDoc(sharedStateRef(dataUser), { billPaidState: nextState }, { merge: true });
     return nextState;
   });
   const isBillPaid = (key: string) => Boolean(billPaidState[key]);
   const handleSignOut = async () => { if (!onSignOut) return; setIsSigningOut(true); setSignOutError(""); try { await onSignOut(); } catch { setSignOutError("Não foi possível sair agora."); setIsSigningOut(false); } };
-  const planningPageProps = { movements, user, displayName, initials, storageKey: user?.uid ?? "local", onSignOut: onSignOut ? () => void handleSignOut() : undefined, onToggleBill: toggleBill, isBillPaid, sharedEntryOverrides: entryOverrides, goals, goalsSyncError, onCreateGoal: saveGoal, onDeleteGoal: deleteGoal, onContributeGoal: contributeToGoal };
-  const pageContent = activeView === "payments" ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} /> : activeView === "dashboard" ? <DashboardPage movements={movements} goals={goals} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onSaveMovement={(movement) => { void saveMovement(movement); }} sharedEntryOverrides={entryOverrides} onEntryOverridesChange={(overrides) => { void saveEntryOverrides(overrides); }} onOpenCalendar={() => changeView("payments")} onOpenMovement={() => setIsMovementModalOpen(true)} storageKey={user?.uid ?? "local"} /> : activeView === "bills" ? <BillsPage {...planningPageProps} /> : activeView === "income" ? <IncomePage {...planningPageProps} /> : activeView === "goals" ? <GoalsPage {...planningPageProps} /> : activeView === "members" ? <MembersPage {...planningPageProps} /> : <SettingsPage {...planningPageProps} />;
+  const planningPageProps = {
+    movements,
+    user,
+    displayName,
+    initials,
+    storageKey: dataOwnerUid ?? "local",
+    onSignOut: onSignOut ? () => void handleSignOut() : undefined,
+    onToggleBill: toggleBill,
+    isBillPaid,
+    sharedEntryOverrides: entryOverrides,
+    goals,
+    canEditData,
+    canDeleteData,
+    goalsSyncError,
+    onCreateGoal: canEditData ? saveGoal : undefined,
+    onDeleteGoal: canDeleteData ? deleteGoal : undefined,
+    onContributeGoal: canEditData ? contributeToGoal : undefined,
+    householdId: dataOwnerUid ?? undefined,
+    householdError,
+    accessLevel,
+    members: householdMembers,
+    invites: householdInvites,
+    onCreateInvite: accessLevel === "owner" ? createInvite : undefined,
+    onUpdateMemberAccess: accessLevel === "owner" ? updateMemberAccess : undefined,
+    onRemoveMember: accessLevel === "owner" ? removeMember : undefined,
+    onRevokeInvite: accessLevel === "owner" ? revokeInvite : undefined,
+  };
+  const pageContent = activeView === "payments"
+    ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} />
+    : activeView === "dashboard"
+      ? <DashboardPage movements={movements} goals={goals} canEditData={canEditData} canDeleteData={canDeleteData} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onSaveMovement={(movement) => { void saveMovement(movement); }} sharedEntryOverrides={entryOverrides} onEntryOverridesChange={(overrides) => { void saveEntryOverrides(overrides); }} onOpenCalendar={() => changeView("payments")} onOpenMovement={() => { if (canEditData) setIsMovementModalOpen(true); }} storageKey={dataOwnerUid ?? "local"} />
+      : activeView === "bills" ? <BillsPage {...planningPageProps} />
+        : activeView === "income" ? <IncomePage {...planningPageProps} />
+          : activeView === "goals" ? <GoalsPage {...planningPageProps} />
+            : activeView === "members" ? <MembersPage {...planningPageProps} />
+              : <SettingsPage {...planningPageProps} />;
 
-  if (!movementsLoaded || !goalsLoaded) return null;
+  if (!householdLoaded || !movementsLoaded || !goalsLoaded) return null;
   return <main className="app-shell"><AppNavigation isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} activeView={activeView} onNavigate={changeView} /><section className="content"><AppTopbar user={user} calendarMonth={calendarMonth} isCalendarView={activeView === "payments"} initials={initials} onMenuOpen={() => setIsMenuOpen(true)} onCalendarOpen={() => changeView("payments")} onDashboard={() => changeView("dashboard")} onProfileOpen={() => setIsProfileOpen(true)} />{pageContent}{isProfileOpen && <ProfileModal user={user} displayName={displayName} initials={initials} signOutError={signOutError} isSigningOut={isSigningOut} onClose={() => setIsProfileOpen(false)} onSignOut={onSignOut ? () => void handleSignOut() : undefined} />}{isMovementModalOpen && <MovementModal onClose={() => setIsMovementModalOpen(false)} onSubmit={(movement) => { void saveMovement(movement); setBillPaidState((current) => ({ ...current, [movementBillKey(movement.id)]: false })); setIsMovementModalOpen(false); }} />}</section></main>;
 }

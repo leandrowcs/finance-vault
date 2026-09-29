@@ -967,6 +967,33 @@
   color: #805d27;
   font-size: 11px;
 }
+.goal-month-balance {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  padding: 10px;
+  border: 1px solid #dce8df;
+  border-radius: 7px;
+  background: #f6faf8;
+}
+.goal-month-balance p {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.goal-month-balance p:last-child {
+  color: var(--ink);
+  font-weight: 700;
+}
+.goal-month-balance strong {
+  white-space: nowrap;
+}
 .goal-contribution-form button {
   min-height: 36px;
   padding: 7px 10px;
@@ -987,6 +1014,47 @@
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--paper);
+}
+.member-invite-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 220px) auto;
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.member-invite-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 600;
+}
+.member-invite-form input,
+.member-invite-form select,
+.member-controls select {
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #d8e0d9;
+  border-radius: 7px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 12px;
+}
+.member-invite-form button {
+  min-height: 38px;
+}
+.member-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.member-controls .entry-delete-button {
+  width: 34px;
+  height: 34px;
+}
+.pending-invite {
+  border-style: dashed;
 }
 .member-status {
   color: #397153;
@@ -2472,8 +2540,13 @@
     flex-direction: column;
   }
   .goal-form,
-  .goal-grid {
+  .goal-grid,
+  .member-invite-form {
     grid-template-columns: 1fr;
+  }
+  .member-invite-form button {
+    width: 100%;
+    justify-content: center;
   }
   .movement-owner-toggle {
     grid-template-columns: 1fr;
@@ -2506,6 +2579,9 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .goal-contribution-form {
+    grid-template-columns: 1fr;
+  }
+  .goal-month-balance {
     grid-template-columns: 1fr;
   }
   .goal-contribution-form button {

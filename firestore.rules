@@ -6,44 +6,125 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function allowedEmail() {
-      return signedIn() && request.auth.token.email in [
-        'leandrowcs@gmail.com',
-        'pedron.ketlin@gmail.com'
-      ];
+    function householdMember(householdId) {
+      return signedIn() && exists(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid));
     }
 
-    function householdMember(householdId) {
-      return allowedEmail() && exists(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid));
+    function householdOwner(householdId) {
+      return signedIn() && request.auth.uid == householdId;
+    }
+
+    function memberAccessLevel(householdId) {
+      return get(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid)).data.accessLevel;
+    }
+
+    function canReadUserData(userId) {
+      return signedIn() && (request.auth.uid == userId || householdMember(userId));
+    }
+
+    function canEditUserData(userId) {
+      return signedIn() && (request.auth.uid == userId || (householdMember(userId) && memberAccessLevel(userId) in ['edit', 'delete', 'owner']));
+    }
+
+    function canDeleteUserData(userId) {
+      return signedIn() && (request.auth.uid == userId || (householdMember(userId) && memberAccessLevel(userId) in ['delete', 'owner']));
+    }
+
+    function acceptedInvite(householdId, inviteId, memberId) {
+      let invitePath = /databases/$(database)/documents/households/$(householdId)/invites/$(inviteId);
+      let invite = getAfter(invitePath).data;
+      return existsAfter(invitePath)
+        && invite.status == 'accepted'
+        && invite.acceptedBy == memberId
+        && invite.email == request.auth.token.email
+        && invite.accessLevel == request.resource.data.accessLevel;
     }
 
     match /households/{householdId} {
-      allow read: if householdMember(householdId);
-      allow create: if allowedEmail() && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if householdMember(householdId);
+      allow read: if householdOwner(householdId) || householdMember(householdId);
+      allow create: if householdOwner(householdId) && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if householdOwner(householdId);
       allow delete: if false;
 
       match /members/{memberId} {
-        allow read: if householdMember(householdId);
-        allow write: if householdMember(householdId) && memberId == request.auth.uid;
+        allow read: if householdOwner(householdId) || householdMember(householdId);
+        allow create: if (householdOwner(householdId)
+            && memberId == request.auth.uid
+            && request.resource.data.accessLevel == 'owner')
+          || (signedIn()
+            && memberId == request.auth.uid
+            && request.resource.data.email == request.auth.token.email
+            && request.resource.data.inviteId is string
+            && acceptedInvite(householdId, request.resource.data.inviteId, memberId));
+        allow update: if householdOwner(householdId)
+          && memberId != householdId
+          && request.resource.data.accessLevel in ['read', 'edit', 'delete'];
+        allow delete: if householdOwner(householdId) && memberId != householdId;
+      }
+
+      match /invites/{inviteId} {
+        allow read: if householdOwner(householdId)
+          || (signedIn() && resource.data.email == request.auth.token.email);
+        allow create: if householdOwner(householdId)
+          && request.resource.data.email is string
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.status == 'pending'
+          && request.resource.data.accessLevel in ['read', 'edit', 'delete']
+          && request.resource.data.expiresAt > request.time;
+        allow update: if signedIn()
+          && resource.data.email == request.auth.token.email
+          && resource.data.status == 'pending'
+          && resource.data.expiresAt > request.time
+          && request.resource.data.status == 'accepted'
+          && request.resource.data.acceptedBy == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'acceptedBy', 'acceptedAt']);
+        allow delete: if householdOwner(householdId);
       }
 
       match /{collection}/{documentId} {
-        allow read, write: if householdMember(householdId)
-          && collection in ['incomeSources', 'bills', 'payPeriods', 'billOccurrences', 'goals'];
+        allow read: if householdOwner(householdId)
+          || (householdMember(householdId) && collection in ['incomeSources', 'bills', 'payPeriods', 'billOccurrences']);
+        allow create, update: if householdMember(householdId)
+          && memberAccessLevel(householdId) in ['edit', 'delete', 'owner']
+          && collection in ['incomeSources', 'bills', 'payPeriods', 'billOccurrences'];
+        allow delete: if householdMember(householdId)
+          && memberAccessLevel(householdId) in ['delete', 'owner']
+          && collection in ['incomeSources', 'bills', 'payPeriods', 'billOccurrences'];
       }
     }
 
     match /users/{userId}/movements/{movementId} {
-      allow read, write: if signedIn() && request.auth.uid == userId;
+      allow read: if canReadUserData(userId);
+      allow create, update: if canEditUserData(userId);
+      allow delete: if canDeleteUserData(userId);
     }
 
     match /users/{userId}/settings/{settingId} {
-      allow read, write: if signedIn() && request.auth.uid == userId;
+      allow read: if canReadUserData(userId);
+      allow create, update: if canEditUserData(userId);
+      allow delete: if canDeleteUserData(userId);
     }
 
     match /users/{userId}/goals/{goalId} {
-      allow read, write: if signedIn() && request.auth.uid == userId;
+      allow read: if canReadUserData(userId);
+      allow create, update: if canEditUserData(userId);
+      allow delete: if canDeleteUserData(userId);
+    }
+
+    match /users/{userId}/memberships/{householdId} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.ownerUid == householdId
+        && existsAfter(/databases/$(database)/documents/households/$(householdId)/members/$(userId));
+      allow update: if signedIn()
+        && request.auth.uid == householdId
+        && existsAfter(/databases/$(database)/documents/households/$(householdId)/members/$(userId))
+        && getAfter(/databases/$(database)/documents/households/$(householdId)/members/$(userId)).data.accessLevel == request.resource.data.accessLevel;
+      allow delete: if signedIn()
+        && (request.auth.uid == userId
+          || (request.auth.uid == householdId
+            && !existsAfter(/databases/$(database)/documents/households/$(householdId)/members/$(userId))));
     }
   }
 }
