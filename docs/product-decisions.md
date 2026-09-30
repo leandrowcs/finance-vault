@@ -11,8 +11,10 @@
 - The household owner is Leandro Wanderley.
 - The spouse is Ketlin Pedron.
 - Shared expenses remain split equally between them.
+- On invitation acceptance, existing personal records stay under the member's original UID and are not copied automatically. The shared budget uses the owner's records.
+- Any future personal-data import must preview and deduplicate records, require explicit approval, and copy without deleting the personal source.
 - The original invitation to Ketlin has already been sent. Do not send another original invitation.
-- Automatic email delivery is deferred until the app supports inviting people beyond this household. Current invitations require the user to send the prefilled email.
+- Manual email draft and automatic Firebase Email Link delivery are available; automatic delivery requires Email Link sign-in enabled in Firebase Authentication.
 
 ### Available balance
 
@@ -40,4 +42,4 @@
 2. Planning data: implemented with Firestore-backed periods, recurring bill templates, actual receipt events, bill occurrences, overdue status, and payment history. Seed migration is versioned and deterministic; recurring occurrences are generated 12 months forward.
 3. Add planned/manual income matching and explicit replace-or-add confirmation.
 4. Add Achieved Goals, spending records, and return of unused funds to the current month.
-5. Add automatic invitation delivery only when inviting additional people becomes a product requirement.
+5. Review migration and security-test edge cases before expanding invitations beyond this household.

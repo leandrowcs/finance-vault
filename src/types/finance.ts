@@ -90,6 +90,7 @@ export type Goal = {
 };
 
 export type MemberAccessLevel = "read" | "edit" | "delete" | "owner";
+export type InviteDeliveryMode = "manual" | "automatic";
 
 export type HouseholdMember = {
   uid: string;
@@ -102,7 +103,9 @@ export type HouseholdInvite = {
   id: string;
   email: string;
   accessLevel: Exclude<MemberAccessLevel, "owner">;
-  status: "pending" | "accepted";
+  delivery: InviteDeliveryMode;
+  status: "pending" | "accepted" | "expired";
+  expiresAt: string;
 };
 
 export type CalendarItem = {

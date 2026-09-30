@@ -1141,7 +1141,7 @@
 }
 .member-invite-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 220px) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 180px) minmax(0, 180px) auto;
   align-items: end;
   gap: 10px;
   margin-bottom: 18px;
@@ -1179,6 +1179,15 @@
 }
 .pending-invite {
   border-style: dashed;
+  flex-wrap: wrap;
+}
+.pending-invite > div {
+  flex-basis: min(100%, 240px);
+}
+.member-data-notice {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 11px;
 }
 .member-status {
   color: #397153;

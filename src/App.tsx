@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { User } from "firebase/auth";
+import { sendSignInLinkToEmail, type User } from "firebase/auth";
 import { arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, increment, onSnapshot, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, writeBatch } from "firebase/firestore";
 import { financePeriods } from "./data/financeSeed";
 import { AppNavigation, type NavigationView } from "./components/AppNavigation";
@@ -10,8 +10,8 @@ import { CalendarPage } from "./pages/CalendarPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { BillsPage, GoalsPage, IncomePage, MembersPage, SettingsPage } from "./pages/PlanningPages";
 import { buildSeedPlanningMigration, dateKey, findPlannedIncomeMatches, generateBillOccurrences, nextPaymentFromPeriods, resolveFinancialEntries, toggleBillOccurrencePayment, type FinancialEntry, type FinanceOverrides } from "./lib/finance";
-import { db } from "./lib/firebase";
-import type { BillOccurrence, BillTemplate, CalendarItem, EditablePayPeriod, Goal, GoalContribution, GoalIncomeSource, HouseholdInvite, HouseholdMember, IncomeRecipient, MemberAccessLevel, Movement, ReceivedPayment } from "./types/finance";
+import { auth, db } from "./lib/firebase";
+import type { BillOccurrence, BillTemplate, CalendarItem, EditablePayPeriod, Goal, GoalContribution, GoalIncomeSource, HouseholdInvite, HouseholdMember, IncomeRecipient, InviteDeliveryMode, MemberAccessLevel, Movement, ReceivedPayment } from "./types/finance";
 import "./App.css";
 
 type AppProps = { user?: User | null; onSignOut?: () => Promise<void> };
@@ -404,7 +404,13 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
         id: item.id,
         email: String(item.data().email ?? ""),
         accessLevel: item.data().accessLevel as Exclude<MemberAccessLevel, "owner">,
-        status: item.data().status as HouseholdInvite["status"],
+        status: item.data().status === "accepted"
+          ? "accepted"
+          : item.data().expiresAt?.toDate?.() instanceof Date && item.data().expiresAt.toDate() <= new Date()
+            ? "expired"
+            : "pending",
+        expiresAt: item.data().expiresAt?.toDate?.()?.toISOString?.() ?? "",
+        delivery: item.data().delivery === "automatic" ? "automatic" : "manual",
       })));
     }, () => setHouseholdError("Não foi possível carregar os convites."));
     return () => {
@@ -1029,7 +1035,7 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       throw new Error("Goal contribution failed");
     }
   };
-  const createInvite = async (email: string, inviteAccess: Exclude<MemberAccessLevel, "owner">) => {
+  const createInvite = async (email: string, inviteAccess: Exclude<MemberAccessLevel, "owner">, delivery: InviteDeliveryMode) => {
     if (!user || !db || accessLevel !== "owner" || !dataOwnerUid) throw new Error("Only owner can invite members");
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail || normalizedEmail === user.email?.trim().toLowerCase()) throw new Error("Invalid invite email");
@@ -1045,6 +1051,7 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       email: normalizedEmail,
       accessLevel: inviteAccess,
       status: "pending",
+      delivery,
       createdBy: user.uid,
       createdAt: serverTimestamp(),
       expiresAt: Timestamp.fromDate(new Date(Date.now() + 7 * 86400000)),
@@ -1053,7 +1060,54 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     inviteUrl.searchParams.set("inviteHousehold", dataOwnerUid);
     inviteUrl.searchParams.set("inviteId", inviteId);
     inviteUrl.hash = "members";
-    return inviteUrl.toString();
+    const url = inviteUrl.toString();
+    if (delivery === "automatic") {
+      if (!auth) throw new Error("Firebase Auth is unavailable");
+      try {
+        await sendSignInLinkToEmail(auth, normalizedEmail, { url, handleCodeInApp: true });
+      } catch (error) {
+        await deleteDoc(inviteRef);
+        throw error;
+      }
+    }
+    return url;
+  };
+  const resendInvite = async (inviteId: string) => {
+    if (!user || !db || accessLevel !== "owner" || !dataOwnerUid) throw new Error("Owner permission required");
+    const oldInviteRef = doc(db, "households", dataOwnerUid, "invites", inviteId);
+    const oldInviteSnapshot = await getDoc(oldInviteRef);
+    if (!oldInviteSnapshot.exists()) throw new Error("Invite not found");
+    const oldInvite = oldInviteSnapshot.data();
+    const nextInviteId = crypto.randomUUID();
+    const nextInviteRef = doc(db, "households", dataOwnerUid, "invites", nextInviteId);
+    const email = String(oldInvite.email).trim().toLowerCase();
+    const expiresAt = Timestamp.fromDate(new Date(Date.now() + 7 * 86400000));
+    const delivery = oldInvite.delivery === "automatic" ? "automatic" : "manual";
+    await setDoc(nextInviteRef, {
+      email,
+      accessLevel: oldInvite.accessLevel,
+      delivery,
+      status: "pending",
+      createdBy: user.uid,
+      createdAt: serverTimestamp(),
+      expiresAt,
+    });
+    const inviteUrl = new URL(window.location.href);
+    inviteUrl.searchParams.set("inviteHousehold", dataOwnerUid);
+    inviteUrl.searchParams.set("inviteId", nextInviteId);
+    inviteUrl.hash = "members";
+    const url = inviteUrl.toString();
+    if (delivery === "automatic") {
+      if (!auth) throw new Error("Firebase Auth is unavailable");
+      try {
+        await sendSignInLinkToEmail(auth, email, { url, handleCodeInApp: true });
+      } catch (error) {
+        await deleteDoc(nextInviteRef);
+        throw error;
+      }
+    }
+    await deleteDoc(oldInviteRef);
+    return url;
   };
   const updateMemberAccess = async (memberId: string, nextAccess: Exclude<MemberAccessLevel, "owner">) => {
     if (!user || !db || accessLevel !== "owner" || !dataOwnerUid || memberId === dataOwnerUid) {
@@ -1136,6 +1190,7 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     members: householdMembers,
     invites: householdInvites,
     onCreateInvite: accessLevel === "owner" ? createInvite : undefined,
+    onResendInvite: accessLevel === "owner" ? resendInvite : undefined,
     onUpdateMemberAccess: accessLevel === "owner" ? updateMemberAccess : undefined,
     onRemoveMember: accessLevel === "owner" ? removeMember : undefined,
     onRevokeInvite: accessLevel === "owner" ? revokeInvite : undefined,

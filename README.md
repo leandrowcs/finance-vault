@@ -12,7 +12,7 @@ npm run dev
 ## Firebase
 
 1. Crie um projeto no [Firebase Console](https://console.firebase.google.com/).
-2. Ative Authentication > Sign-in method > Google.
+2. Ative Authentication > Sign-in method > Google e Email/Password > Email link (passwordless sign-in).
 3. Crie o Firestore Database em modo de produção.
 4. Cadastre um app Web e copie a configuração para `.env.local` usando `.env.example`.
 5. Configure `VITE_ALLOWED_EMAILS` com os e-mails autorizados para acesso direto, separados por vírgula. Membros convidados usam o aceite do convite.
@@ -29,6 +29,10 @@ firebase deploy --only firestore:rules,firestore:indexes
 As variáveis `VITE_*` não são segredos de servidor, mas devem ser configuradas também no ambiente de produção da Vercel.
 
 O planejamento doméstico fica em `households/{ownerUid}`: `payPeriods` guarda previsões e recebimentos parciais, `bills` guarda modelos recorrentes e `billOccurrences` guarda vencimentos, estado de pagamento e histórico. Recorrências geram ocorrências até 12 meses à frente. A migração do seed usa `planningMigrationVersion` e IDs determinísticos para não duplicar registros. Pagamentos feitos no app são totais; reabrir uma conta registra evento sem apagar o histórico.
+
+Convites podem abrir um rascunho manual ou enviar automaticamente um link de autenticação por e-mail do Firebase. O modo automático exige Email Link ativado e o domínio de continuação autorizado.
+
+Ao aceitar convite, dados pessoais existentes do membro permanecem sob o UID original. Não há importação automática para o orçamento compartilhado.
 
 ## Vercel
 

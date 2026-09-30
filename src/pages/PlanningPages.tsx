@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
 import { financePeriods, type SeedPayPeriod } from "../data/financeSeed";
 import { calculateFinanceLedger, currency, dateKey, resolveFinancialEntries } from "../lib/finance";
-import type { BillOccurrence, BillTemplate, EditablePayPeriod, Goal, GoalIncomeSource, HouseholdInvite, HouseholdMember, IncomeRecipient, MemberAccessLevel, Movement, ReceivedPayment } from "../types/finance";
+import type { BillOccurrence, BillTemplate, EditablePayPeriod, Goal, GoalIncomeSource, HouseholdInvite, HouseholdMember, IncomeRecipient, InviteDeliveryMode, MemberAccessLevel, Movement, ReceivedPayment } from "../types/finance";
 
 type EntryOverride = Partial<Movement> & { deleted?: boolean };
 type EntryOverrides = Record<string, EntryOverride>;
@@ -38,7 +38,8 @@ type PlanningPageProps = {
   accessLevel?: MemberAccessLevel;
   members?: HouseholdMember[];
   invites?: HouseholdInvite[];
-  onCreateInvite?: (email: string, accessLevel: Exclude<MemberAccessLevel, "owner">) => Promise<string>;
+  onCreateInvite?: (email: string, accessLevel: Exclude<MemberAccessLevel, "owner">, delivery: InviteDeliveryMode) => Promise<string>;
+  onResendInvite?: (inviteId: string) => Promise<string>;
   onUpdateMemberAccess?: (memberId: string, accessLevel: Exclude<MemberAccessLevel, "owner">) => Promise<void>;
   onRemoveMember?: (memberId: string) => Promise<void>;
   onRevokeInvite?: (inviteId: string) => Promise<void>;
@@ -748,27 +749,72 @@ export function MembersPage({
   members = [],
   invites = [],
   onCreateInvite,
+  onResendInvite,
   onUpdateMemberAccess,
   onRemoveMember,
   onRevokeInvite,
 }: PlanningPageProps) {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteAccess, setInviteAccess] = useState<Exclude<MemberAccessLevel, "owner">>("read");
+  const [inviteDelivery, setInviteDelivery] = useState<InviteDeliveryMode>("manual");
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [fallbackInviteLink, setFallbackInviteLink] = useState("");
+  const [isSendingInvite, setIsSendingInvite] = useState(false);
   const isOwner = accessLevel === "owner";
   const sendInvite = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!onCreateInvite) return;
     setError("");
+    setIsSendingInvite(true);
     try {
-      const inviteUrl = await onCreateInvite(inviteEmail.trim().toLowerCase(), inviteAccess);
+      const inviteUrl = await onCreateInvite(inviteEmail.trim().toLowerCase(), inviteAccess, inviteDelivery);
       const accessLabel = inviteAccess === "read" ? "Leitura" : inviteAccess === "edit" ? "Edição" : "Edição e exclusão";
-      const subject = encodeURIComponent("Convite para o FinanceVault");
-      const body = encodeURIComponent(`${displayName} convidou você para compartilhar o FinanceVault (${accessLabel}).\n\nAceite o convite: ${inviteUrl}`);
-      window.location.href = `mailto:${encodeURIComponent(inviteEmail.trim())}?subject=${subject}&body=${body}`;
+      if (inviteDelivery === "manual") {
+        const subject = encodeURIComponent("Convite para o FinanceVault");
+        const body = encodeURIComponent(`${displayName} convidou você para compartilhar o FinanceVault (${accessLabel}).\n\nAceite o convite: ${inviteUrl}`);
+        window.location.href = `mailto:${encodeURIComponent(inviteEmail.trim())}?subject=${subject}&body=${body}`;
+        setMessage("Rascunho aberto no aplicativo de e-mail.");
+      } else {
+        setMessage("Convite enviado automaticamente.");
+      }
       setInviteEmail("");
     } catch {
       setError("Não foi possível criar o convite.");
+    } finally {
+      setIsSendingInvite(false);
+    }
+  };
+  const copyInviteLink = async (invite: HouseholdInvite) => {
+    if (!householdId) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("inviteHousehold", householdId);
+    url.searchParams.set("inviteId", invite.id);
+    url.hash = "members";
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      setFallbackInviteLink("");
+      setMessage("Link copiado.");
+    } catch {
+      setFallbackInviteLink(url.toString());
+      setError("Cópia automática indisponível; copie o link abaixo.");
+    }
+  };
+  const resendInvite = async (invite: HouseholdInvite) => {
+    if (!onResendInvite) return;
+    setError("");
+    try {
+      const inviteUrl = await onResendInvite(invite.id);
+      if (invite.delivery === "automatic") {
+        setMessage(`Novo convite enviado para ${invite.email}.`);
+        return;
+      }
+      const subject = encodeURIComponent("Convite para o FinanceVault");
+      const body = encodeURIComponent(`${displayName} convidou você para compartilhar o FinanceVault.\n\nAceite o convite: ${inviteUrl}`);
+      window.location.href = `mailto:${encodeURIComponent(invite.email)}?subject=${subject}&body=${body}`;
+      setMessage("Novo rascunho aberto.");
+    } catch {
+      setError("Não foi possível reenviar o convite.");
     }
   };
   const updateAccess = async (memberId: string, level: Exclude<MemberAccessLevel, "owner">) => {
@@ -801,6 +847,7 @@ export function MembersPage({
 
   return (
     <PageFrame eyebrow="COLABORAÇÃO" title="Membros" copy="Convide pessoas e controle o acesso aos dados deste orçamento.">
+      {!isOwner && <p className="member-data-notice">Seus registros anteriores permanecem na sua conta privada. Nada é importado sem revisão para evitar duplicidades.</p>}
       {isOwner && (
         <form className="member-invite-form" onSubmit={(event) => void sendInvite(event)}>
           <label>
@@ -815,10 +862,19 @@ export function MembersPage({
               <option value="delete">Ler, editar e deletar</option>
             </select>
           </label>
-          <button className="solid-button" type="submit" disabled={!householdId || !onCreateInvite}>Enviar convite</button>
+          <label>
+            <span>Envio</span>
+            <select value={inviteDelivery} onChange={(event) => setInviteDelivery(event.target.value as InviteDeliveryMode)}>
+              <option value="manual">Manual</option>
+              <option value="automatic">Automático</option>
+            </select>
+          </label>
+          <button className="solid-button" type="submit" disabled={!householdId || !onCreateInvite || isSendingInvite}>{isSendingInvite ? "Enviando…" : "Enviar convite"}</button>
         </form>
       )}
       {(error || householdError) && <p className="movement-error" role="alert">{error || householdError}</p>}
+      {message && <p className="member-status" role="status">{message}</p>}
+      {fallbackInviteLink && <input aria-label="Link do convite para copiar manualmente" readOnly value={fallbackInviteLink} onFocus={(event) => event.currentTarget.select()} />}
       <div className="member-list">
         {members.length === 0 && user && isOwner && (
           <section className="member-card">
@@ -844,9 +900,11 @@ export function MembersPage({
           </section>
         ))}
       </div>
-      {isOwner && invites.filter((invite) => invite.status === "pending").map((invite) => (
+      {isOwner && invites.filter((invite) => invite.status === "pending" || invite.status === "expired").map((invite) => (
         <section className="member-card pending-invite" key={invite.id}>
-          <div><strong>{invite.email}</strong><small>Convite pendente · {invite.accessLevel === "read" ? "Leitura" : invite.accessLevel === "edit" ? "Edição" : "Edição e exclusão"}</small></div>
+          <div><strong>{invite.email}</strong><small>{invite.status === "expired" ? "Expirado" : `Pendente até ${formatDate(invite.expiresAt.slice(0, 10))}`} · {invite.accessLevel === "read" ? "Leitura" : invite.accessLevel === "edit" ? "Edição" : "Edição e exclusão"} · {invite.delivery === "automatic" ? "Automático" : "Manual"}</small></div>
+          <button className="outline-button" type="button" onClick={() => void copyInviteLink(invite)}>Copiar link</button>
+          <button className="outline-button" type="button" onClick={() => void resendInvite(invite)} disabled={!onResendInvite}>Reenviar</button>
           <button className="entry-delete-button" type="button" aria-label={`Revogar convite para ${invite.email}`} onClick={() => void cancelInvite(invite.id)}><Trash2 size={15} /></button>
         </section>
       ))}
