@@ -33,6 +33,11 @@ export type MonthlyFinanceBalance = {
   balance: number;
 };
 
+export function sumPaymentBalances(payments: readonly { balance: number }[]) {
+  const totalCents = payments.reduce((total, payment) => total + amountInCents(payment.balance), 0);
+  return totalCents / 100;
+}
+
 const owners: FinanceOwner[] = ["Você", "Esposa"];
 
 function amountInCents(amount: number) {

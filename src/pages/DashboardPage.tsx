@@ -14,7 +14,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { FloatingActionButton } from "../components/FloatingActionButton";
 import { MovementModal } from "../components/MovementModal";
-import { calculateFinanceLedger, cgiPaymentDate, cgiPaymentLabel, currency, dateKey, monthLabels, resolveFinancialEntries, splitOwnerAmount } from "../lib/finance";
+import { calculateFinanceLedger, cgiPaymentDate, cgiPaymentLabel, currency, dateKey, monthLabels, resolveFinancialEntries, splitOwnerAmount, sumPaymentBalances } from "../lib/finance";
 import type { Bill, Goal, Movement } from "../types/finance";
 
 type Person = "Leandro" | "Ketlin";
@@ -743,7 +743,7 @@ export function DashboardPage({
         incomeTotal,
         expenseTotal,
         savingsTotal,
-        balance: allocation?.balance ?? incomeTotal - expenseTotal - savingsTotal,
+        balance: sumPaymentBalances(paymentBalances),
         incomeByPerson,
         expenseByPerson,
         incomeEntriesByPerson,

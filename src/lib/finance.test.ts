@@ -7,6 +7,7 @@ import {
   findPlannedIncomeMatches,
   resolveFinancialEntries,
   splitOwnerAmount,
+  sumPaymentBalances,
 } from "./finance";
 
 function period(date: string, overrides: Partial<SeedPayPeriod> = {}): SeedPayPeriod {
@@ -84,6 +85,13 @@ describe("financial entry resolution", () => {
 });
 
 describe("monthly allocation", () => {
+  it("matches the monthly summary to the displayed payment balances", () => {
+    expect(sumPaymentBalances([
+      { balance: -530.08 },
+      { balance: 853.93 },
+    ])).toBe(323.85);
+  });
+
   it("allocates received income to same-month bills before later bills", () => {
     const entries = resolveFinancialEntries([], {}, [
       period("2026-09-01", {
@@ -123,6 +131,31 @@ describe("monthly allocation", () => {
     expect(ledger.get("2026-09")?.unfundedExpensesByOwner["Você"]).toBe(0);
     expect(ledger.get("2026-09")?.availableByOwner["Você"]).toBe(0);
     expect(ledger.get("2026-10")?.unfundedExpensesByOwner["Você"]).toBe(30);
+  });
+
+  it("monthly balance equals the sum of the two September payment balances", () => {
+    const movements: Movement[] = [
+      { id: "sep-03-income", type: "income", amount: 4700.97, date: "2026-09-03", description: "Payment", category: "Salário", owner: "Você" },
+      { id: "sep-03-expenses", type: "expense", amount: 5231.05, date: "2026-09-12", description: "Bills due before Sep 17", category: "Casa", owner: "Compartilhado" },
+      { id: "sep-17-expenses", type: "expense", amount: 3398.58, date: "2026-09-20", description: "Bills due after Sep 17", category: "Casa", owner: "Compartilhado" },
+    ];
+    const september = period("2026-09-17", {
+      income: { leandro: 2692.62, ketlin: 2059.89, extras: 0, leiaUniversitySavings: 0 },
+    });
+    const contribution: GoalContribution = {
+      id: "sep-17-goal",
+      amount: 500,
+      date: "2026-09-17",
+      incomeSourceId: "period-income:2026-09-17:leandro",
+      incomeSourceDate: "2026-09-17",
+      incomeSourceOwner: "Você",
+    };
+    const month = calculateFinanceLedger(resolveFinancialEntries(movements, {}, [september]), [contribution]).get("2026-09");
+
+    expect(month?.incomeTotal).toBe(9453.48);
+    expect(month?.expenseTotal).toBe(8629.63);
+    expect(month?.goalContributionsTotal).toBe(500);
+    expect(month?.balance).toBeCloseTo(323.85, 2);
   });
 
   it("splits shared expenses equally", () => {
