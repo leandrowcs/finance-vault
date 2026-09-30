@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
-import { arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, writeBatch } from "firebase/firestore";
+import { arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, increment, onSnapshot, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, writeBatch } from "firebase/firestore";
 import { financePeriods } from "./data/financeSeed";
 import { AppNavigation, type NavigationView } from "./components/AppNavigation";
 import { AppTopbar } from "./components/AppTopbar";
@@ -9,9 +9,9 @@ import { MovementModal } from "./components/MovementModal";
 import { CalendarPage } from "./pages/CalendarPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { BillsPage, GoalsPage, IncomePage, MembersPage, SettingsPage } from "./pages/PlanningPages";
-import { dateKey, findPlannedIncomeMatches, nextPaymentPeriod, resolveFinancialEntries, type FinancialEntry, type FinanceOverrides } from "./lib/finance";
+import { buildSeedPlanningMigration, dateKey, findPlannedIncomeMatches, generateBillOccurrences, nextPaymentFromPeriods, resolveFinancialEntries, toggleBillOccurrencePayment, type FinancialEntry, type FinanceOverrides } from "./lib/finance";
 import { db } from "./lib/firebase";
-import type { CalendarItem, Goal, GoalContribution, GoalIncomeSource, HouseholdInvite, HouseholdMember, MemberAccessLevel, Movement } from "./types/finance";
+import type { BillOccurrence, BillTemplate, CalendarItem, EditablePayPeriod, Goal, GoalContribution, GoalIncomeSource, HouseholdInvite, HouseholdMember, IncomeRecipient, MemberAccessLevel, Movement, ReceivedPayment } from "./types/finance";
 import "./App.css";
 
 type AppProps = { user?: User | null; onSignOut?: () => Promise<void> };
@@ -121,6 +121,40 @@ function normalizeGoal(id: string, data: Record<string, unknown>): Goal {
   };
 }
 
+function materializePlanningPeriods(
+  periods: EditablePayPeriod[],
+  billTemplates: BillTemplate[],
+  billOccurrences: BillOccurrence[],
+) {
+  const templatesById = new Map(billTemplates.map((bill) => [bill.id, bill]));
+  const knownPeriodDates = new Set(periods.map((period) => period.date));
+  const syntheticPeriods = [...new Set(billOccurrences
+    .map((occurrence) => occurrence.periodDate)
+    .filter((periodDate) => !knownPeriodDates.has(periodDate)))].map((date): EditablePayPeriod => ({
+      date,
+      label: date,
+      income: { ketlin: 0, leandro: 0, extras: 0, leiaUniversitySavings: 0 },
+    }));
+  return [...periods, ...syntheticPeriods].map((period) => ({
+    ...period,
+    bills: billOccurrences
+      .filter((occurrence) => occurrence.periodDate === period.date)
+      .map((occurrence) => ({
+        id: occurrence.billId,
+        name: occurrence.name,
+        owner: occurrence.owner,
+        amount: occurrence.amount,
+        due: occurrence.dueDate,
+        dueDate: occurrence.dueDate,
+        category: occurrence.category,
+        paid: occurrence.status === "paid",
+        recurrence: templatesById.get(occurrence.billId)?.recurrence,
+        occurrenceHistory: occurrence.history,
+        paidAmount: occurrence.paidAmount ?? 0,
+      })),
+  })).sort((left, right) => left.date.localeCompare(right.date));
+}
+
 function readStoredGoals(storageKey: string) {
   try {
     const stored = localStorage.getItem(goalsStorageKey(storageKey));
@@ -215,6 +249,7 @@ function expandRecurringMovement(movement: Movement) {
 }
 
 export default function App({ user = null, onSignOut }: AppProps = {}) {
+  const [initialPlanning] = useState(() => buildSeedPlanningMigration(financePeriods, readStoredBillState(user)));
   const [billPaidState, setBillPaidState] = useState<Record<string, boolean>>(() => ({ ...Object.fromEntries(financePeriods.flatMap((period) => period.bills.map((bill) => [periodBillKey(period.date, bill.id), bill.paid]))), ...readStoredBillState(user) }));
   const [entryOverrides, setEntryOverrides] = useState<EntryOverrides | undefined>();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -234,6 +269,11 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [goalsLoaded, setGoalsLoaded] = useState(false);
   const [goalsSyncError, setGoalsSyncError] = useState("");
+  const [planningPeriods, setPlanningPeriods] = useState<EditablePayPeriod[]>(initialPlanning.periods);
+  const [billTemplates, setBillTemplates] = useState<BillTemplate[]>(initialPlanning.bills);
+  const [billOccurrences, setBillOccurrences] = useState<BillOccurrence[]>(initialPlanning.occurrences);
+  const [planningLoaded, setPlanningLoaded] = useState(!user || !db);
+  const [planningError, setPlanningError] = useState("");
   const [dataOwnerUid, setDataOwnerUid] = useState<string | null>(user?.uid ?? null);
   const [householdLoaded, setHouseholdLoaded] = useState(!user || !db);
   const [householdError, setHouseholdError] = useState("");
@@ -241,6 +281,8 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
   const [householdInvites, setHouseholdInvites] = useState<HouseholdInvite[]>([]);
   const dataUser: DataUser = dataOwnerUid ? { uid: dataOwnerUid } : null;
+  const canEditData = accessLevel !== "read";
+  const canDeleteData = accessLevel === "delete" || accessLevel === "owner";
   const changeView = (view: NavigationView) => {
     setActiveView(view);
     if (typeof window !== "undefined") window.history.replaceState(null, "", `#${view}`);
@@ -371,6 +413,30 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     };
   }, [accessLevel, dataOwnerUid, householdLoaded, user]);
   useEffect(() => {
+    if (!db || !dataOwnerUid || !canEditData || billTemplates.length === 0) return;
+    const horizonEnd = new Date(`${dateKey(new Date())}T12:00:00`);
+    horizonEnd.setFullYear(horizonEnd.getFullYear() + 1);
+    const today = dateKey(new Date());
+    const existingIds = new Set(billOccurrences.map((occurrence) => occurrence.id));
+    const missing = billTemplates.flatMap((bill) => generateBillOccurrences(bill, dateKey(horizonEnd)))
+      .filter((occurrence) => occurrence.dueDate >= today && !existingIds.has(occurrence.id));
+    if (missing.length === 0) return;
+    let active = true;
+    const firestore = db;
+    void (async () => {
+      for (let offset = 0; offset < missing.length; offset += 450) {
+        const batch = writeBatch(firestore);
+        missing.slice(offset, offset + 450).forEach((occurrence) => {
+          batch.set(doc(firestore, "households", dataOwnerUid, "billOccurrences", occurrence.id), occurrence);
+        });
+        await batch.commit();
+      }
+    })().catch(() => {
+      if (active) setPlanningError("Não foi possível gerar os próximos vencimentos recorrentes.");
+    });
+    return () => { active = false; };
+  }, [billOccurrences, billTemplates, canEditData, dataOwnerUid]);
+  useEffect(() => {
     if (!user || !db || !householdLoaded || !dataOwnerUid || dataOwnerUid === user.uid) return;
     const firestore = db;
     const membershipRef = doc(firestore, "users", user.uid, "memberships", dataOwnerUid);
@@ -392,6 +458,85 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       setAccessLevel(snapshot.data().accessLevel as MemberAccessLevel);
     }, revokeAccess);
   }, [dataOwnerUid, householdLoaded, user]);
+  useEffect(() => {
+    if (!householdLoaded || !dataOwnerUid) return;
+    const firestore = db;
+    if (!firestore) {
+      setPlanningLoaded(true);
+      return;
+    }
+    let active = true;
+    let unsubscribe: (() => void)[] = [];
+    setPlanningLoaded(false);
+    setPlanningError("");
+    const initializePlanning = async () => {
+      try {
+        const householdRef = doc(firestore, "households", dataOwnerUid);
+        const stateRef = sharedStateRef({ uid: dataOwnerUid });
+        await runTransaction(firestore, async (transaction) => {
+          const [householdSnapshot, stateSnapshot] = await Promise.all([
+            transaction.get(householdRef),
+            transaction.get(stateRef),
+          ]);
+          if (householdSnapshot.data()?.planningMigrationVersion === 1) return;
+          if (accessLevel !== "owner") throw new Error("Owner must initialize household planning");
+          const sharedState = stateSnapshot.data() as { billPaidState?: Record<string, boolean> } | undefined;
+          const migration = buildSeedPlanningMigration(
+            financePeriods,
+            { ...readStoredBillState({ uid: dataOwnerUid }), ...sharedState?.billPaidState },
+          );
+          migration.periods.forEach((period) => {
+            transaction.set(doc(firestore, "households", dataOwnerUid, "payPeriods", period.date), period);
+          });
+          migration.bills.forEach((bill) => {
+            transaction.set(doc(firestore, "households", dataOwnerUid, "bills", bill.id), bill);
+          });
+          migration.occurrences.forEach((occurrence) => {
+            transaction.set(doc(firestore, "households", dataOwnerUid, "billOccurrences", occurrence.id), occurrence);
+          });
+          transaction.set(householdRef, { planningMigrationVersion: 1, planningMigratedAt: serverTimestamp() }, { merge: true });
+        });
+        if (!active) return;
+        let periodsSnapshot: EditablePayPeriod[] | null = null;
+        let billsSnapshot: BillTemplate[] | null = null;
+        let occurrencesSnapshot: BillOccurrence[] | null = null;
+        const publish = () => {
+          if (!active || !periodsSnapshot || !billsSnapshot || !occurrencesSnapshot) return;
+          setPlanningPeriods(periodsSnapshot);
+          setBillTemplates(billsSnapshot);
+          setBillOccurrences(occurrencesSnapshot);
+          setPlanningLoaded(true);
+        };
+        unsubscribe = [
+          onSnapshot(collection(firestore, "households", dataOwnerUid, "payPeriods"), (snapshot) => {
+            periodsSnapshot = snapshot.docs.map((item) => ({ ...item.data(), date: item.id }) as EditablePayPeriod);
+            publish();
+          }, () => { setPlanningError("Não foi possível carregar os períodos."); setPlanningLoaded(true); }),
+          onSnapshot(collection(firestore, "households", dataOwnerUid, "bills"), (snapshot) => {
+            billsSnapshot = snapshot.docs.map((item) => ({ ...item.data(), id: item.id }) as BillTemplate);
+            publish();
+          }, () => { setPlanningError("Não foi possível carregar as contas recorrentes."); setPlanningLoaded(true); }),
+          onSnapshot(collection(firestore, "households", dataOwnerUid, "billOccurrences"), (snapshot) => {
+            occurrencesSnapshot = snapshot.docs.map((item) => ({ ...item.data(), id: item.id, history: Array.isArray(item.data().history) ? item.data().history : [] }) as BillOccurrence);
+            publish();
+          }, () => { setPlanningError("Não foi possível carregar o histórico de contas."); setPlanningLoaded(true); }),
+        ];
+      } catch {
+        if (!active) return;
+        setPlanningError("Não foi possível migrar ou carregar o planejamento do Firestore.");
+        setPlanningLoaded(true);
+      }
+    };
+    void initializePlanning();
+    return () => {
+      active = false;
+      unsubscribe.forEach((stop) => stop());
+    };
+  }, [accessLevel, dataOwnerUid, householdLoaded]);
+  const activePlanningPeriods = useMemo(
+    () => materializePlanningPeriods(planningPeriods, billTemplates, billOccurrences),
+    [billOccurrences, billTemplates, planningPeriods],
+  );
   useEffect(() => {
     if (!householdLoaded) return;
     const activeDataUser: DataUser = dataOwnerUid ? { uid: dataOwnerUid } : null;
@@ -512,8 +657,6 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       unsubscribe();
     };
   }, [dataOwnerUid, householdLoaded]);
-  const canEditData = accessLevel !== "read";
-  const canDeleteData = accessLevel === "delete" || accessLevel === "owner";
   const saveMovement = async (movement: Movement, replacedPlannedIncomeKeys: string[] = []) => {
     if (!canEditData) return false;
     const savedMovements = expandRecurringMovement(movement);
@@ -554,7 +697,7 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     setMovementSaveError("");
     const matches = findPlannedIncomeMatches(
       movement,
-      resolveFinancialEntries(movements, entryOverrides ?? {}),
+      resolveFinancialEntries(movements, entryOverrides ?? {}, activePlanningPeriods),
     );
     if (matches.length > 0) {
       setIncomeConflict({ movement, matches });
@@ -646,6 +789,146 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
         throw new Error("Goal sync failed");
       }
     }
+  };
+  const savePayPeriod = async (period: EditablePayPeriod, previousDate?: string) => {
+    if (!canEditData) throw new Error("Edit permission required");
+    const existingPeriod = previousDate ? planningPeriods.find((item) => item.date === previousDate) : undefined;
+    if (planningPeriods.some((item) => item.date === period.date && item.date !== previousDate)) {
+      throw new Error("A pay period already exists on that date");
+    }
+    const actualLeandro = period.receivedIncome?.leandro?.reduce((total, item) => total + item.actualAmount, 0) ?? 0;
+    const actualKetlin = period.receivedIncome?.ketlin?.reduce((total, item) => total + item.actualAmount, 0) ?? 0;
+    if (
+      !Number.isFinite(period.income.leandro) || period.income.leandro < actualLeandro ||
+      !Number.isFinite(period.income.ketlin) || period.income.ketlin < actualKetlin ||
+      period.income.extras < 0 || period.income.leiaUniversitySavings < 0
+    ) throw new Error("Planned income cannot be less than already received income");
+    if (dataUser && db) {
+      const firestore = db;
+      const batch = writeBatch(firestore);
+      const periodRef = doc(firestore, "households", dataUser.uid, "payPeriods", period.date);
+      const existingRef = doc(firestore, "households", dataUser.uid, "payPeriods", previousDate ?? period.date);
+      const existingReceipts = existingPeriod?.receivedIncome ?? {};
+      const receivedIncome = { ...existingReceipts, ...period.receivedIncome };
+      for (const recipient of ["leandro", "ketlin"] as const) {
+        const received = receivedIncome[recipient]?.reduce((total, payment) => total + payment.actualAmount, 0) ?? 0;
+        if (received > period.income[recipient] + 0.005) throw new Error("Planned income cannot be less than received income");
+      }
+      batch.set(periodRef, { ...period, receivedIncome });
+      if (previousDate && previousDate !== period.date) {
+        batch.delete(existingRef);
+        billOccurrences.filter((occurrence) => occurrence.periodDate === previousDate).forEach((occurrence) => {
+          batch.update(doc(firestore, "households", dataUser.uid, "billOccurrences", occurrence.id), { periodDate: period.date });
+        });
+      }
+      await batch.commit();
+      return;
+    }
+    setPlanningPeriods((current) => {
+      const merged = { ...period, receivedIncome: { ...existingPeriod?.receivedIncome, ...period.receivedIncome } };
+      return [...current.filter((item) => item.date !== previousDate && item.date !== period.date), merged].sort((left, right) => left.date.localeCompare(right.date));
+    });
+    if (previousDate && previousDate !== period.date) {
+      setBillOccurrences((current) => current.map((occurrence) => occurrence.periodDate === previousDate ? { ...occurrence, periodDate: period.date } : occurrence));
+    }
+  };
+  const saveBillTemplate = async (bill: BillTemplate) => {
+    if (!canEditData) throw new Error("Edit permission required");
+    const firestore = db;
+    const endDate = new Date(`${dateKey(new Date())}T12:00:00`);
+    endDate.setFullYear(endDate.getFullYear() + 1);
+    const occurrences = generateBillOccurrences(bill, dateKey(endDate));
+    const occurrencesById = new Map(occurrences.map((occurrence) => [occurrence.id, occurrence]));
+    const existingBillOccurrences = billOccurrences.filter((occurrence) => occurrence.billId === bill.id);
+    if (dataUser && firestore) {
+      const batch = writeBatch(firestore);
+      batch.set(doc(firestore, "households", dataUser.uid, "bills", bill.id), bill);
+      occurrences.forEach((occurrence) => {
+        const current = existingBillOccurrences.find((item) => item.id === occurrence.id);
+        if (current?.status === "paid") return;
+        batch.set(doc(firestore, "households", dataUser.uid, "billOccurrences", occurrence.id), {
+          ...occurrence,
+          history: current?.history ?? [],
+          status: current?.status ?? occurrence.status,
+          paidAmount: current?.paidAmount ?? occurrence.paidAmount,
+        });
+      });
+      existingBillOccurrences
+        .filter((occurrence) => occurrence.status === "planned" && occurrence.dueDate >= dateKey(new Date()) && !occurrencesById.has(occurrence.id))
+        .forEach((occurrence) => batch.delete(doc(firestore, "households", dataUser.uid, "billOccurrences", occurrence.id)));
+      await batch.commit();
+      return;
+    }
+    setBillTemplates((current) => [...current.filter((item) => item.id !== bill.id), bill]);
+    setBillOccurrences((current) => [
+      ...current.filter((item) => item.billId !== bill.id || item.status === "paid" || item.dueDate < dateKey(new Date())),
+      ...occurrences.filter((item) => !existingBillOccurrences.some((currentItem) => currentItem.id === item.id)),
+    ]);
+  };
+  const receiveIncome = async (periodDate: string, recipient: IncomeRecipient, payment: ReceivedPayment) => {
+    if (!canEditData) throw new Error("Edit permission required");
+    const today = dateKey(new Date());
+    const receiptDate = new Date(`${payment.receivedAt}T12:00:00`);
+    if (
+      !Number.isFinite(payment.actualAmount) ||
+      payment.actualAmount <= 0 ||
+      dateKey(receiptDate) !== payment.receivedAt ||
+      payment.receivedAt > today
+    ) {
+      throw new Error("Invalid receipt");
+    }
+    const receipt = { ...payment, id: crypto.randomUUID() };
+    if (dataUser && db) {
+      const periodRef = doc(db, "households", dataUser.uid, "payPeriods", periodDate);
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(periodRef);
+        if (!snapshot.exists()) throw new Error("Pay period not found");
+        const period = snapshot.data() as EditablePayPeriod;
+        const received = period.receivedIncome?.[recipient] ?? [];
+        const receivedTotal = received.reduce((total, item) => total + item.actualAmount, 0);
+        const plannedAmount = period.income[recipient];
+        if (receivedTotal + payment.actualAmount > plannedAmount + 0.005) {
+          throw new Error("Receipt exceeds planned income");
+        }
+        transaction.update(periodRef, { [`receivedIncome.${recipient}`]: arrayUnion(receipt) });
+      });
+      return;
+    }
+    setPlanningPeriods((current) => current.map((period) => {
+      if (period.date !== periodDate) return period;
+      const received = period.receivedIncome?.[recipient] ?? [];
+      const plannedAmount = period.income[recipient];
+      if (received.reduce((total, item) => total + item.actualAmount, 0) + receipt.actualAmount > plannedAmount + 0.005) {
+        throw new Error("Receipt exceeds planned income");
+      }
+      return { ...period, receivedIncome: { ...period.receivedIncome, [recipient]: [...received, receipt] } };
+    }));
+  };
+  const toggleBillOccurrence = async (occurrenceId: string) => {
+    if (!canEditData) throw new Error("Edit permission required");
+    const occurrence = billOccurrences.find((item) => item.id === occurrenceId);
+    if (!occurrence) throw new Error("Bill occurrence not found");
+    const eventId = crypto.randomUUID();
+    const eventDate = dateKey(new Date());
+    if (dataUser && db) {
+      const occurrenceRef = doc(db, "households", dataUser.uid, "billOccurrences", occurrenceId);
+      await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(occurrenceRef);
+        if (!snapshot.exists()) throw new Error("Bill occurrence not found");
+        const current = snapshot.data() as BillOccurrence;
+        const next = toggleBillOccurrencePayment(current, eventId, eventDate);
+        transaction.update(occurrenceRef, {
+          status: next.status,
+          paidAmount: next.paidAmount,
+          paidAt: next.paidAt ?? deleteField(),
+          history: arrayUnion(next.history.at(-1)),
+        });
+      });
+      return;
+    }
+    setBillOccurrences((current) => current.map((item) => item.id === occurrenceId
+      ? toggleBillOccurrencePayment(item, eventId, eventDate)
+      : item));
   };
   const deleteGoal = async (goalId: string) => {
     if (!canDeleteData) throw new Error("Delete permission required");
@@ -797,7 +1080,7 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const calendarItems = useMemo(() => {
     const items = new Map<string, CalendarItem[]>();
     const addItem = (date: string, item: CalendarItem) => items.set(date, [...(items.get(date) ?? []), item]);
-    resolveFinancialEntries(movements, entryOverrides ?? {}).forEach((entry) => {
+    resolveFinancialEntries(movements, entryOverrides ?? {}, activePlanningPeriods).forEach((entry) => {
       addItem(entry.date, {
         type: entry.type === "income" ? "income" : "bill",
         title: entry.title,
@@ -806,10 +1089,11 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       });
     });
     return items;
-  }, [entryOverrides, movements]);
+  }, [activePlanningPeriods, entryOverrides, movements]);
   const displayName = user?.displayName || user?.email || "Usuário";
   const initials = displayName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
-  const nextPaymentDate = new Date(`${nextPaymentPeriod.date}T12:00:00`);
+  const upcomingPayment = nextPaymentFromPeriods(activePlanningPeriods, openedAt);
+  const nextPaymentDate = new Date(`${upcomingPayment.date}T12:00:00`);
   const daysUntilNextPayment = Math.max(0, Math.ceil((nextPaymentDate.getTime() - openedAt.getTime()) / 86400000));
   const changeCalendarMonth = (offset: number) => { setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1)); setSelectedDay(null); };
   const toggleBill = (key: string) => setBillPaidState((current) => {
@@ -823,6 +1107,10 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const handleSignOut = async () => { if (!onSignOut) return; setIsSigningOut(true); setSignOutError(""); try { await onSignOut(); } catch { setSignOutError("Não foi possível sair agora."); setIsSigningOut(false); } };
   const planningPageProps = {
     movements,
+    periods: activePlanningPeriods,
+    billTemplates,
+    billOccurrences,
+    planningError,
     user,
     displayName,
     initials,
@@ -838,6 +1126,10 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     onCreateGoal: canEditData ? saveGoal : undefined,
     onDeleteGoal: canDeleteData ? deleteGoal : undefined,
     onContributeGoal: canEditData ? contributeToGoal : undefined,
+    onCreatePayPeriod: canEditData ? savePayPeriod : undefined,
+    onReceiveIncome: canEditData ? receiveIncome : undefined,
+    onCreateBillTemplate: canEditData ? saveBillTemplate : undefined,
+    onToggleBillOccurrence: canEditData ? toggleBillOccurrence : undefined,
     householdId: dataOwnerUid ?? undefined,
     householdError,
     accessLevel,
@@ -851,14 +1143,14 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const pageContent = activeView === "payments"
     ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} />
     : activeView === "dashboard"
-      ? <DashboardPage movements={movements} goals={goals} canEditData={canEditData} canDeleteData={canDeleteData} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onSaveMovement={submitMovement} sharedEntryOverrides={entryOverrides} onEntryOverridesChange={(overrides) => { void saveEntryOverrides(overrides); }} onOpenCalendar={() => changeView("payments")} onOpenMovement={() => { if (canEditData) setIsMovementModalOpen(true); }} storageKey={dataOwnerUid ?? "local"} />
+      ? <DashboardPage movements={movements} periods={activePlanningPeriods} goals={goals} canEditData={canEditData} canDeleteData={canDeleteData} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} onToggleBillOccurrence={canEditData ? toggleBillOccurrence : undefined} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onSaveMovement={submitMovement} sharedEntryOverrides={entryOverrides} onEntryOverridesChange={(overrides) => { void saveEntryOverrides(overrides); }} onOpenCalendar={() => changeView("payments")} onOpenMovement={() => { if (canEditData) setIsMovementModalOpen(true); }} storageKey={dataOwnerUid ?? "local"} />
       : activeView === "bills" ? <BillsPage {...planningPageProps} />
         : activeView === "income" ? <IncomePage {...planningPageProps} />
           : activeView === "goals" ? <GoalsPage {...planningPageProps} />
             : activeView === "members" ? <MembersPage {...planningPageProps} />
               : <SettingsPage {...planningPageProps} />;
 
-  if (!householdLoaded || !movementsLoaded || !goalsLoaded) return null;
+  if (!householdLoaded || !movementsLoaded || !goalsLoaded || !planningLoaded) return null;
   return (
     <main className="app-shell">
       <AppNavigation isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} activeView={activeView} onNavigate={changeView} />

@@ -28,6 +28,8 @@ firebase deploy --only firestore:rules,firestore:indexes
 
 As variáveis `VITE_*` não são segredos de servidor, mas devem ser configuradas também no ambiente de produção da Vercel.
 
+O planejamento doméstico fica em `households/{ownerUid}`: `payPeriods` guarda previsões e recebimentos parciais, `bills` guarda modelos recorrentes e `billOccurrences` guarda vencimentos, estado de pagamento e histórico. Recorrências geram ocorrências até 12 meses à frente. A migração do seed usa `planningMigrationVersion` e IDs determinísticos para não duplicar registros. Pagamentos feitos no app são totais; reabrir uma conta registra evento sem apagar o histórico.
+
 ## Vercel
 
 1. Importe o repositório em [Vercel](https://vercel.com/new).

@@ -919,6 +919,91 @@
   gap: 10px;
   margin-bottom: 20px;
 }
+.income-period-form,
+.bill-template-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: end;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.income-period-form label,
+.bill-template-form label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 600;
+}
+.income-period-form input,
+.bill-template-form input,
+.bill-template-form select,
+.income-receipt-form input {
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid #d8e0d9;
+  border-radius: 7px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 11px;
+}
+.income-period-form button,
+.bill-template-form button {
+  min-height: 36px;
+  justify-content: center;
+}
+.bill-template-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid #edf0ec;
+}
+.bill-template-row > div {
+  min-width: 0;
+}
+.bill-template-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.bill-template-row .bill-template-form {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+.bill-template-active {
+  display: flex !important;
+  align-items: center;
+  gap: 7px !important;
+}
+.bill-template-active input {
+  min-height: auto;
+}
+.income-planning-row {
+  flex-wrap: wrap;
+}
+.income-receipt-form {
+  display: grid;
+  grid-template-columns: 120px 140px auto;
+  align-items: end;
+  gap: 6px;
+  width: 100%;
+  margin: 3px 0;
+}
+.income-receipt-form button {
+  min-height: 36px;
+  justify-content: center;
+  padding: 7px 9px;
+  font-size: 10px;
+}
 .goal-form label {
   display: grid;
   gap: 6px;
@@ -2580,7 +2665,12 @@
   }
   .goal-form,
   .goal-grid,
-  .member-invite-form {
+  .member-invite-form,
+  .income-period-form,
+  .bill-template-form {
+    grid-template-columns: 1fr;
+  }
+  .income-receipt-form {
     grid-template-columns: 1fr;
   }
   .member-invite-form button {

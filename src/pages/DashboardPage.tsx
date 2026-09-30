@@ -14,6 +14,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { FloatingActionButton } from "../components/FloatingActionButton";
 import { MovementModal } from "../components/MovementModal";
+import type { SeedPayPeriod } from "../data/financeSeed";
 import { calculateFinanceLedger, cgiPaymentDate, cgiPaymentLabel, currency, dateKey, monthLabels, resolveFinancialEntries, splitOwnerAmount, sumPaymentBalances } from "../lib/finance";
 import type { Bill, Goal, Movement } from "../types/finance";
 
@@ -24,6 +25,8 @@ type ExpenseEntry = {
   expenseDate: Date;
   toggleKey: string;
   editKey: string;
+  occurrenceId?: string;
+  history?: Bill["occurrenceHistory"];
 };
 type IncomeEntry = {
   id: string;
@@ -65,6 +68,7 @@ type MonthSummary = {
 };
 type DashboardPageProps = {
   movements: Movement[];
+  periods: SeedPayPeriod[];
   goals: Goal[];
   canEditData: boolean;
   canDeleteData: boolean;
@@ -72,6 +76,7 @@ type DashboardPageProps = {
   openedDateLabel: string;
   daysUntilNextPayment: number;
   onToggleBill: (key: string) => void;
+  onToggleBillOccurrence?: (occurrenceId: string) => Promise<void>;
   isBillPaid: (key: string) => boolean;
   onDeleteMovement: (movementId: string) => void;
   onSaveMovement: (movement: Movement) => void;
@@ -121,12 +126,14 @@ function MonthDetailsModal({
   month,
   onClose,
   onToggleBill,
+  onToggleBillOccurrence,
   onEdit,
   canEditData,
 }: {
   month: MonthSummary;
   onClose: () => void;
   onToggleBill: (key: string) => void;
+  onToggleBillOccurrence?: (occurrenceId: string) => Promise<void>;
   onEdit: (movement: Movement) => void;
   canEditData: boolean;
 }) {
@@ -340,6 +347,8 @@ function MonthDetailsModal({
                             expenseDate,
                             toggleKey,
                             editKey,
+                            occurrenceId,
+                            history,
                           }) => (
                             <article
                               className="month-details-expense-card"
@@ -379,6 +388,9 @@ function MonthDetailsModal({
                                     <ArrowUpRight size={13} />
                                     Receita: {incomeLabel}
                                   </span>
+                                  {history?.slice(-2).map((event) => (
+                                    <span key={event.id}>{event.action === "paid" ? "Pago" : "Reaberto"}: {dateFormatter.format(new Date(`${event.date}T12:00:00`))} · {currency.format(event.amount)}</span>
+                                  ))}
                                 </div>
                                 <div className="month-details-expense-card-actions">
                                   {canEditData && (
@@ -414,7 +426,9 @@ function MonthDetailsModal({
                                         ? `Desmarcar ${bill.name}`
                                         : `Marcar ${bill.name} como paga`
                                     }
-                                    onClick={() => onToggleBill(toggleKey)}
+                                    onClick={() => occurrenceId && onToggleBillOccurrence
+                                      ? void onToggleBillOccurrence(occurrenceId)
+                                      : onToggleBill(toggleKey)}
                                   >
                                     {bill.paid ? (
                                       <CircleCheck size={18} />
@@ -511,6 +525,7 @@ function MonthDetailsModal({
 
 export function DashboardPage({
   movements,
+  periods,
   goals,
   canEditData,
   canDeleteData,
@@ -518,6 +533,7 @@ export function DashboardPage({
   openedDateLabel,
   daysUntilNextPayment,
   onToggleBill,
+  onToggleBillOccurrence,
   isBillPaid,
   onDeleteMovement,
   onSaveMovement,
@@ -551,8 +567,8 @@ export function DashboardPage({
   };
 
   const financialEntries = useMemo(
-    () => resolveFinancialEntries(movements, entryOverrides),
-    [movements, entryOverrides],
+    () => resolveFinancialEntries(movements, entryOverrides, periods),
+    [movements, entryOverrides, periods],
   );
   const contributions = useMemo(() => goals.flatMap((goal) => goal.contributions), [goals]);
   const ledger = useMemo(() => calculateFinanceLedger(financialEntries, contributions), [financialEntries, contributions]);
@@ -620,12 +636,14 @@ export function DashboardPage({
                 amount: entry.amount,
                 due: entry.date,
                 category: entry.category,
-                paid: isBillPaid(entry.toggleKey),
+                                    paid: entry.occurrenceId ? entry.paid : isBillPaid(entry.toggleKey),
               },
               incomeLabel: cgiPaymentLabel(expenseDate),
               expenseDate,
               toggleKey: entry.toggleKey,
               editKey: entry.key,
+              occurrenceId: entry.occurrenceId,
+              history: entry.paymentHistory,
             };
           })
           .sort((left, right) => left.expenseDate.getTime() - right.expenseDate.getTime()),
@@ -999,6 +1017,7 @@ export function DashboardPage({
           month={selectedMonth}
           onClose={() => setSelectedMonthKey(null)}
           onToggleBill={onToggleBill}
+          onToggleBillOccurrence={onToggleBillOccurrence}
           onEdit={setEditingMovement}
           canEditData={canEditData}
         />

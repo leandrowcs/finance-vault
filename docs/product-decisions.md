@@ -37,6 +37,7 @@
 ## Follow-up Batches
 
 1. Unify income allocation and monthly balance calculations; add focused financial tests.
-2. Add planned/manual income matching and explicit replace-or-add confirmation.
-3. Add Achieved Goals, spending records, and return of unused funds to the current month.
-4. Add automatic invitation delivery only when inviting additional people becomes a product requirement.
+2. Planning data: implemented with Firestore-backed periods, recurring bill templates, actual receipt events, bill occurrences, overdue status, and payment history. Seed migration is versioned and deterministic; recurring occurrences are generated 12 months forward.
+3. Add planned/manual income matching and explicit replace-or-add confirmation.
+4. Add Achieved Goals, spending records, and return of unused funds to the current month.
+5. Add automatic invitation delivery only when inviting additional people becomes a product requirement.

@@ -8,6 +8,10 @@ export type SeedBill = {
   due: string;
   category: string;
   paid: boolean;
+  dueDate?: string;
+  recurrence?: "once" | "biweekly" | "monthly" | "yearly";
+  occurrenceHistory?: { id: string; date: string; amount: number; action: "paid" | "reopened" }[];
+  paidAmount?: number;
 };
 
 export type SeedPayPeriod = {
@@ -19,6 +23,7 @@ export type SeedPayPeriod = {
     extras: number;
     leiaUniversitySavings: number;
   };
+  receivedIncome?: Partial<Record<"leandro" | "ketlin", { id: string; actualAmount: number; receivedAt: string }[]>>;
   bills: SeedBill[];
 };
 

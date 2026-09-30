@@ -1,5 +1,5 @@
 import { financePeriods, totalIncome, type SeedPayPeriod } from "../data/financeSeed";
-import type { Bill, GoalContribution, Movement, Owner } from "../types/finance";
+import type { Bill, BillOccurrence, BillPaymentEvent, BillTemplate, EditablePayPeriod, GoalContribution, Movement, Owner } from "../types/finance";
 
 export const currency = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", currencyDisplay: "code" });
 export const monthLabels = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
@@ -17,6 +17,13 @@ export type FinancialEntry = {
   title: string;
   category: string;
   toggleKey: string;
+  received: boolean;
+  paid: boolean;
+  periodDate?: string;
+  incomeRecipient?: "leandro" | "ketlin";
+  paidAmount?: number;
+  paymentHistory?: BillPaymentEvent[];
+  occurrenceId?: string;
   movement: Movement;
 };
 export type FinanceOwner = Exclude<Owner, "Compartilhado">;
@@ -31,6 +38,11 @@ export type MonthlyFinanceBalance = {
   expenseTotal: number;
   goalContributionsTotal: number;
   balance: number;
+};
+export type PlanningMigration = {
+  periods: EditablePayPeriod[];
+  bills: BillTemplate[];
+  occurrences: BillOccurrence[];
 };
 
 export function sumPaymentBalances(payments: readonly { balance: number }[]) {
@@ -66,35 +78,73 @@ export function resolveFinancialEntries(
       const key = `period-income:${period.date}:${person}`;
       const override = overrides[key];
       if (override?.deleted) return [];
-      const movement: Movement = {
-        id: key,
-        type: "income",
-        amount: override?.amount ?? amount,
-        date: override?.date ?? period.date,
-        description: override?.description ?? "Receita recebida",
-        category: override?.category ?? "Salário",
-        owner: override?.owner ?? owner,
-      };
-      if (!Number.isFinite(movement.amount) || movement.amount <= 0) return [];
-      return [{
+      const receipts = period.receivedIncome?.[person] ?? [];
+      const plannedAmount = override?.amount ?? amount;
+      const title = override?.description ?? "Pagamento planejado";
+      const category = override?.category ?? "Salário";
+      const recipient = override?.owner ?? owner;
+      const actualEntries: FinancialEntry[] = receipts.flatMap((receipt) => {
+        if (!Number.isFinite(receipt.actualAmount) || receipt.actualAmount <= 0) return [];
+        const movement: Movement = {
+          id: `${key}:receipt:${receipt.id}`,
+          type: "income",
+          amount: receipt.actualAmount,
+          date: receipt.receivedAt,
+          description: `${title} · recebido`,
+          category,
+          owner: recipient,
+        };
+        return [{
+          id: movement.id,
+          key: movement.id,
+          type: "income",
+          kind: "planned" as const,
+          date: movement.date,
+          amount: movement.amount,
+          owner: movement.owner,
+          title: movement.description,
+          category: movement.category,
+          toggleKey: movement.id,
+          received: true,
+          paid: false,
+          periodDate: period.date,
+          incomeRecipient: person,
+          movement,
+        }];
+      });
+      const remainingAmount = Math.max(0, plannedAmount - receipts.reduce((total, receipt) => total + receipt.actualAmount, 0));
+      const plannedEntry: FinancialEntry[] = remainingAmount > 0 ? [{
         id: key,
         key,
         type: "income",
-        kind: "planned" as const,
-        date: movement.date,
-        amount: movement.amount,
-        owner: movement.owner,
-        title: movement.description,
-        category: movement.category,
+        kind: "planned",
+        date: override?.date ?? period.date,
+        amount: remainingAmount,
+        owner: recipient,
+        title,
+        category,
         toggleKey: key,
-        movement,
-      }];
+        received: false,
+        paid: false,
+        periodDate: period.date,
+        incomeRecipient: person,
+        movement: {
+          id: key,
+          type: "income",
+          amount: remainingAmount,
+          date: override?.date ?? period.date,
+          description: title,
+          category,
+          owner: recipient,
+        },
+      }] : [];
+      return [...actualEntries, ...plannedEntry];
     });
     const expenses: FinancialEntry[] = period.bills.flatMap((bill) => {
       const key = `period-expense:${period.date}:${bill.id}`;
       const override = overrides[key];
       if (override?.deleted) return [];
-      const defaultDate = dateKey(dueDate(period.date, bill.due));
+      const defaultDate = bill.dueDate ?? dateKey(dueDate(period.date, bill.due));
       const movement: Movement = {
         id: key,
         type: "expense",
@@ -116,6 +166,11 @@ export function resolveFinancialEntries(
         title: movement.description,
         category: movement.category,
         toggleKey: `period:${period.date}:${bill.id}`,
+        received: false,
+        paid: bill.paid,
+        paidAmount: bill.paidAmount ?? (bill.paid ? movement.amount : 0),
+        paymentHistory: bill.occurrenceHistory ?? [],
+        occurrenceId: billOccurrenceId(bill.id, defaultDate),
         movement,
       }];
     });
@@ -136,6 +191,8 @@ export function resolveFinancialEntries(
       title: resolved.description || (resolved.type === "income" ? "Receita sem descrição" : "Despesa sem descrição"),
       category: resolved.category,
       toggleKey: key,
+      received: resolved.type === "income",
+      paid: false,
       movement: resolved,
     }];
   });
@@ -150,6 +207,7 @@ export function findPlannedIncomeMatches(movement: Movement, entries: FinancialE
   return entries.filter((entry) =>
     entry.kind === "planned" &&
     entry.type === "income" &&
+    !entry.received &&
     entry.date === movement.date &&
     amountInCents(entry.amount) === amount,
   );
@@ -177,6 +235,7 @@ export function calculateFinanceLedger(
     owners.forEach((owner) => { monthly[owner] += split[owner]; });
     totals.set(month, monthly);
     if (entry.type === "income") {
+      if (!entry.received) return;
       owners.forEach((owner) => {
         if (split[owner] <= 0) return;
         incomeLots.push({ id: `${entry.id}:${owner}`, date: entry.date, owner, amount: split[owner], remaining: split[owner] });
@@ -304,6 +363,151 @@ export const dueDate = (periodDate: string, due: string) => {
   return new Date(year, monthIndexes[month], Number(day));
 };
 
+export function billOccurrenceId(billId: string, dueDate: string) {
+  return `${billId}__${dueDate}`;
+}
+
+function dateAtDay(year: number, month: number, day: number) {
+  const finalDay = new Date(year, month + 1, 0).getDate();
+  return dateKey(new Date(year, month, Math.min(day, finalDay), 12));
+}
+
+export function generateBillOccurrences(
+  bill: BillTemplate,
+  horizonEnd = dateKey(new Date(new Date(`${bill.startDate}T12:00:00`).setFullYear(new Date(`${bill.startDate}T12:00:00`).getFullYear() + 1))),
+): BillOccurrence[] {
+  if (!bill.active) return [];
+  const firstDate = new Date(`${bill.startDate}T12:00:00`);
+  const endDate = new Date(`${horizonEnd}T12:00:00`);
+  const dates: string[] = [];
+  if (bill.recurrence === "once") {
+    dates.push(bill.startDate);
+  } else if (bill.recurrence === "biweekly") {
+    const current = new Date(firstDate);
+    while (current <= endDate) {
+      dates.push(dateKey(current));
+      current.setDate(current.getDate() + 14);
+    }
+  } else if (bill.recurrence === "monthly") {
+    const currentMonth = new Date(firstDate.getFullYear(), firstDate.getMonth(), 1, 12);
+    const endMonth = new Date(endDate.getFullYear(), endDate.getMonth(), 1, 12);
+    while (currentMonth <= endMonth) {
+      const occurrenceDate = dateAtDay(currentMonth.getFullYear(), currentMonth.getMonth(), bill.dueDay);
+      if (occurrenceDate >= bill.startDate && occurrenceDate <= horizonEnd) dates.push(occurrenceDate);
+      currentMonth.setMonth(currentMonth.getMonth() + 1);
+    }
+  } else {
+    for (let year = firstDate.getFullYear(); year <= endDate.getFullYear(); year += 1) {
+      const occurrenceDate = dateAtDay(year, firstDate.getMonth(), bill.dueDay);
+      if (occurrenceDate >= bill.startDate && occurrenceDate <= horizonEnd) dates.push(occurrenceDate);
+    }
+  }
+  return dates.map((date): BillOccurrence => ({
+    id: billOccurrenceId(bill.id, date),
+    billId: bill.id,
+    periodDate: date,
+    dueDate: date,
+    name: bill.name,
+    owner: bill.owner,
+    amount: bill.amount,
+    category: bill.category,
+    status: "planned",
+    paidAmount: 0,
+    history: [],
+  }));
+}
+
+export function toggleBillOccurrencePayment(occurrence: BillOccurrence, eventId: string, date: string): BillOccurrence {
+  const wasPaid = occurrence.status === "paid";
+  const event: BillPaymentEvent = {
+    id: eventId,
+    date,
+    amount: wasPaid ? (occurrence.paidAmount ?? occurrence.amount) : occurrence.amount,
+    action: wasPaid ? "reopened" : "paid",
+  };
+  return {
+    ...occurrence,
+    status: wasPaid ? "planned" : "paid",
+    paidAmount: wasPaid ? 0 : occurrence.amount,
+    paidAt: wasPaid ? undefined : date,
+    history: [...occurrence.history, event],
+  };
+}
+
+function billRecurrence(dates: string[]): BillTemplate["recurrence"] {
+  if (dates.length < 2) return "once";
+  const gaps = dates.slice(1).map((date, index) =>
+    Math.round((new Date(`${date}T12:00:00`).getTime() - new Date(`${dates[index]}T12:00:00`).getTime()) / dayMilliseconds),
+  );
+  if (gaps.every((gap) => gap >= 13 && gap <= 15)) return "biweekly";
+  if (gaps.every((gap) => gap >= 28 && gap <= 31)) return "monthly";
+  if (gaps.every((gap) => gap >= 364 && gap <= 366)) return "yearly";
+  return "once";
+}
+
+export function buildSeedPlanningMigration(
+  periods: SeedPayPeriod[] = financePeriods,
+  paidState: Record<string, boolean> = {},
+  migrationDate = dateKey(new Date()),
+): PlanningMigration {
+  const occurrences = periods.flatMap((period) => period.bills.map((bill): BillOccurrence => {
+    const due = bill.dueDate ?? dateKey(dueDate(period.date, bill.due));
+    const id = billOccurrenceId(bill.id, due);
+    const isPaid = paidState[`period:${period.date}:${bill.id}`] ?? bill.paid;
+    return {
+      id,
+      billId: bill.id,
+      periodDate: period.date,
+      dueDate: due,
+      name: bill.name,
+      owner: bill.owner,
+      amount: bill.amount,
+      category: bill.category,
+      status: isPaid ? "paid" : "planned",
+      paidAmount: isPaid ? bill.amount : 0,
+      history: [],
+    };
+  }));
+  const occurrencesByBill = new Map<string, BillOccurrence[]>();
+  occurrences.forEach((occurrence) => occurrencesByBill.set(
+    occurrence.billId,
+    [...(occurrencesByBill.get(occurrence.billId) ?? []), occurrence],
+  ));
+  const bills = [...occurrencesByBill.entries()].map(([id, entries]): BillTemplate => {
+    const first = [...entries].sort((left, right) => left.dueDate.localeCompare(right.dueDate))[0];
+    return {
+      id,
+      name: first.name,
+      owner: first.owner,
+      amount: first.amount,
+      category: first.category,
+      dueDay: Number(first.dueDate.slice(8, 10)),
+      recurrence: billRecurrence(entries.map((entry) => entry.dueDate).sort()),
+      startDate: first.dueDate,
+      active: true,
+    };
+  });
+  const occurrenceById = new Map(occurrences.map((occurrence) => [occurrence.id, occurrence]));
+  bills.forEach((bill) => {
+    generateBillOccurrences(bill, dateKey(new Date(new Date(`${migrationDate}T12:00:00`).setFullYear(new Date(`${migrationDate}T12:00:00`).getFullYear() + 1))))
+      .forEach((occurrence) => {
+        if (!occurrenceById.has(occurrence.id)) occurrenceById.set(occurrence.id, occurrence);
+      });
+  });
+  const editablePeriods = periods.map(({ bills: _bills, ...period }): EditablePayPeriod => ({
+    ...period,
+    receivedIncome: period.receivedIncome ?? {
+      ...(period.date <= migrationDate && period.income.leandro > 0
+        ? { leandro: [{ id: `seed-receipt:${period.date}:leandro`, actualAmount: period.income.leandro, receivedAt: period.date }] }
+        : {}),
+      ...(period.date <= migrationDate && period.income.ketlin > 0
+        ? { ketlin: [{ id: `seed-receipt:${period.date}:ketlin`, actualAmount: period.income.ketlin, receivedAt: period.date }] }
+        : {}),
+    },
+  }));
+  return { periods: editablePeriods, bills, occurrences: [...occurrenceById.values()] };
+}
+
 export const reservedAmount = (bill: Bill) => bill.owner === "Compartilhado" ? bill.amount / 2 : bill.amount;
 
 export const currentMonthPeriods = (date = new Date()) => financePeriods.filter((period) => {
@@ -318,5 +522,13 @@ const nextCgiPayment = () => {
   return { date: dateKey(nextPayment), label: cgiPaymentLabel(nextPayment) };
 };
 
-export const nextPaymentPeriod = financePeriods.find((period) => new Date(`${period.date}T12:00:00`) >= new Date()) ?? nextCgiPayment();
+export function nextPaymentFromPeriods(periods: readonly SeedPayPeriod[], today = new Date()) {
+  const todayKey = dateKey(today);
+  const next = [...periods]
+    .filter((period) => period.date >= todayKey && period.income.leandro + period.income.ketlin + period.income.extras > 0)
+    .sort((left, right) => left.date.localeCompare(right.date))[0];
+  return next ? { date: next.date, label: next.label } : nextCgiPayment();
+}
+
+export const nextPaymentPeriod = nextPaymentFromPeriods(financePeriods);
 export const payments = financePeriods.map((period, index) => ({ date: period.label, label: index === 0 ? "Pagamento recebido" : "Próximo pagamento", amount: totalIncome(period), status: index === 0 ? "upcoming" : "next" }));

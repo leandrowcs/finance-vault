@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { SeedPayPeriod } from "../data/financeSeed";
-import type { GoalContribution, Movement } from "../types/finance";
+import type { BillOccurrence, BillTemplate, GoalContribution, Movement } from "../types/finance";
 import {
   calculateFinanceLedger,
+  billOccurrenceId,
+  buildSeedPlanningMigration,
   currency,
   findPlannedIncomeMatches,
+  generateBillOccurrences,
   resolveFinancialEntries,
   splitOwnerAmount,
   sumPaymentBalances,
+  toggleBillOccurrencePayment,
 } from "./finance";
 
 function period(date: string, overrides: Partial<SeedPayPeriod> = {}): SeedPayPeriod {
@@ -58,6 +62,26 @@ describe("financial entry resolution", () => {
     expect(findPlannedIncomeMatches({ ...candidate, amount: 100.01 }, entries)).toHaveLength(0);
   });
 
+  it("keeps only the unpaid remainder planned after a partial receipt", () => {
+    const entries = resolveFinancialEntries([], {}, [period("2026-09-17", {
+      income: { leandro: 100, ketlin: 0, extras: 0, leiaUniversitySavings: 0 },
+      receivedIncome: { leandro: [{ id: "partial", actualAmount: 40, receivedAt: "2026-09-18" }] },
+    })]);
+    const incomeEntries = entries.filter((entry) => entry.type === "income");
+
+    expect(incomeEntries.filter((entry) => entry.received).map((entry) => entry.amount)).toEqual([40]);
+    expect(incomeEntries.filter((entry) => !entry.received).map((entry) => entry.amount)).toEqual([60]);
+    expect(findPlannedIncomeMatches({
+      id: "partial-manual",
+      type: "income",
+      amount: 40,
+      date: "2026-09-18",
+      description: "Salary",
+      category: "Salário",
+      owner: "Você",
+    }, entries)).toHaveLength(0);
+  });
+
   it("counts replacement once and keeps an extra income in addition to the plan", () => {
     const plan = period("2026-09-17", {
       income: { leandro: 100, ketlin: 0, extras: 0, leiaUniversitySavings: 0 },
@@ -84,6 +108,78 @@ describe("financial entry resolution", () => {
   });
 });
 
+describe("planning migration and recurrence", () => {
+  it("uses deterministic IDs and migrates seed data only once", () => {
+    const periods = [period("2026-09-17", {
+      income: { leandro: 100, ketlin: 50, extras: 0, leiaUniversitySavings: 0 },
+      bills: [{ id: "rent", name: "Rent", owner: "Você", amount: 40, due: "24 set", category: "Casa", paid: true }],
+    })];
+    const first = buildSeedPlanningMigration(periods, { "period:2026-09-17:rent": true }, "2026-09-30");
+    const second = buildSeedPlanningMigration(periods, { "period:2026-09-17:rent": true }, "2026-09-30");
+
+    expect(first.periods).toEqual(second.periods);
+    expect(first.bills).toEqual(second.bills);
+    expect(first.occurrences).toEqual(second.occurrences);
+    expect(first.occurrences[0].id).toBe(billOccurrenceId("rent", "2026-09-24"));
+    expect(first.occurrences[0].status).toBe("paid");
+    expect(first.periods[0].receivedIncome?.leandro?.[0].actualAmount).toBe(100);
+  });
+
+  it("infers recurring seed bills and creates unique future occurrences", () => {
+    const migration = buildSeedPlanningMigration(undefined, {}, "2026-09-30");
+    const home = migration.bills.find((bill) => bill.id === "home");
+    const homeOccurrences = migration.occurrences.filter((item) => item.billId === "home");
+
+    expect(home?.recurrence).toBe("biweekly");
+    expect(homeOccurrences.some((item) => item.dueDate === "2026-10-15")).toBe(true);
+    expect(new Set(migration.occurrences.map((item) => item.id)).size).toBe(migration.occurrences.length);
+  });
+
+  it("generates monthly due dates safely for short months", () => {
+    const bill: BillTemplate = {
+      id: "rent",
+      name: "Rent",
+      owner: "Você",
+      amount: 100,
+      category: "Casa",
+      dueDay: 31,
+      recurrence: "monthly",
+      startDate: "2026-01-31",
+      active: true,
+    };
+
+    expect(generateBillOccurrences(bill, "2026-04-30").map((item) => item.dueDate)).toEqual([
+      "2026-01-31",
+      "2026-02-28",
+      "2026-03-31",
+      "2026-04-30",
+    ]);
+  });
+
+  it("records paid and reopened transitions without erasing history", () => {
+    const occurrence: BillOccurrence = {
+      id: "rent__2026-09-30",
+      billId: "rent",
+      periodDate: "2026-09-30",
+      dueDate: "2026-09-30",
+      name: "Rent",
+      owner: "Você",
+      amount: 100,
+      category: "Casa",
+      status: "planned",
+      paidAmount: 0,
+      history: [],
+    };
+    const paid = toggleBillOccurrencePayment(occurrence, "event-paid", "2026-09-30");
+    const reopened = toggleBillOccurrencePayment(paid, "event-reopened", "2026-10-01");
+
+    expect(paid.status).toBe("paid");
+    expect(paid.paidAmount).toBe(100);
+    expect(reopened.status).toBe("planned");
+    expect(reopened.paidAmount).toBe(0);
+    expect(reopened.history.map((event) => event.action)).toEqual(["paid", "reopened"]);
+  });
+});
 describe("monthly allocation", () => {
   it("matches the monthly summary to the displayed payment balances", () => {
     expect(sumPaymentBalances([
@@ -96,6 +192,7 @@ describe("monthly allocation", () => {
     const entries = resolveFinancialEntries([], {}, [
       period("2026-09-01", {
         income: { leandro: 100, ketlin: 0, extras: 0, leiaUniversitySavings: 0 },
+        receivedIncome: { leandro: [{ id: "salary", actualAmount: 100, receivedAt: "2026-09-01" }] },
         bills: [{ id: "rent", name: "Rent", owner: "Você", amount: 60, due: "10 set", category: "Casa", paid: false }],
       }),
       period("2026-10-01", {
@@ -120,6 +217,7 @@ describe("monthly allocation", () => {
     const entries = resolveFinancialEntries([], {}, [
       period("2026-09-01", {
         income: { leandro: 100, ketlin: 0, extras: 0, leiaUniversitySavings: 0 },
+        receivedIncome: { leandro: [{ id: "salary", actualAmount: 100, receivedAt: "2026-09-01" }] },
         bills: [
           { id: "rent", name: "Rent", owner: "Você", amount: 60, due: "10 set", category: "Casa", paid: false },
           { id: "insurance", name: "Insurance", owner: "Você", amount: 70, due: "03 out", category: "Casa", paid: false },
@@ -141,6 +239,10 @@ describe("monthly allocation", () => {
     ];
     const september = period("2026-09-17", {
       income: { leandro: 2692.62, ketlin: 2059.89, extras: 0, leiaUniversitySavings: 0 },
+      receivedIncome: {
+        leandro: [{ id: "leandro-salary", actualAmount: 2692.62, receivedAt: "2026-09-17" }],
+        ketlin: [{ id: "ketlin-salary", actualAmount: 2059.89, receivedAt: "2026-09-17" }],
+      },
     });
     const contribution: GoalContribution = {
       id: "sep-17-goal",
@@ -191,6 +293,7 @@ describe("monthly allocation", () => {
   it("reserves unassigned legacy contributions once", () => {
     const entries = resolveFinancialEntries([], {}, [period("2026-09-01", {
       income: { leandro: 100, ketlin: 0, extras: 0, leiaUniversitySavings: 0 },
+      receivedIncome: { leandro: [{ id: "salary", actualAmount: 100, receivedAt: "2026-09-01" }] },
       bills: [{ id: "rent", name: "Rent", owner: "Você", amount: 50, due: "10 set", category: "Casa", paid: false }],
     })]);
     const legacyContribution: GoalContribution = { id: "legacy", amount: 10, date: "2026-09-02" };

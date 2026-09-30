@@ -1,14 +1,16 @@
 import { ChevronDown, Check, LogOut, Plus, Target, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
+import { financePeriods, type SeedPayPeriod } from "../data/financeSeed";
 import { calculateFinanceLedger, currency, dateKey, resolveFinancialEntries } from "../lib/finance";
-import type { Goal, GoalIncomeSource, HouseholdInvite, HouseholdMember, MemberAccessLevel, Movement } from "../types/finance";
+import type { BillOccurrence, BillTemplate, EditablePayPeriod, Goal, GoalIncomeSource, HouseholdInvite, HouseholdMember, IncomeRecipient, MemberAccessLevel, Movement, ReceivedPayment } from "../types/finance";
 
 type EntryOverride = Partial<Movement> & { deleted?: boolean };
 type EntryOverrides = Record<string, EntryOverride>;
 
 type PlanningPageProps = {
   movements: Movement[];
+  periods?: SeedPayPeriod[];
   user: User | null;
   displayName: string;
   initials: string;
@@ -18,6 +20,13 @@ type PlanningPageProps = {
   isBillPaid: (key: string) => boolean;
   sharedEntryOverrides?: EntryOverrides;
   goals?: Goal[];
+  billOccurrences?: BillOccurrence[];
+  billTemplates?: BillTemplate[];
+  planningError?: string;
+  onCreatePayPeriod?: (period: EditablePayPeriod, previousDate?: string) => Promise<void>;
+  onReceiveIncome?: (periodDate: string, recipient: IncomeRecipient, payment: ReceivedPayment) => Promise<void>;
+  onCreateBillTemplate?: (bill: BillTemplate) => Promise<void>;
+  onToggleBillOccurrence?: (occurrenceId: string) => Promise<void>;
   canEditData?: boolean;
   canDeleteData?: boolean;
   goalsSyncError?: string;
@@ -47,6 +56,9 @@ type BillListItem = {
   dateLabel: string;
   toggleKey: string;
   paid: boolean;
+  occurrenceId?: string;
+  paidAmount?: number;
+  history?: BillOccurrence["history"];
 };
 type IncomeListItem = {
   id: string;
@@ -57,6 +69,9 @@ type IncomeListItem = {
   owner: Movement["owner"];
   date: string;
   dateLabel: string;
+  received: boolean;
+  periodDate?: string;
+  recipient?: IncomeRecipient;
 };
 type MonthlyGroup<T extends { id: string; amount: number; date: string; kind: ItemKind; title: string }> = {
   key: string;
@@ -203,20 +218,22 @@ function EmptySection({ message }: { message: string }) {
   return <div className="empty-state wide">{message}</div>;
 }
 
-function BillsList({ items, onToggleBill, isBillPaid, canEditData = true }: { items: BillListItem[]; onToggleBill: (key: string) => void; isBillPaid: (key: string) => boolean; canEditData?: boolean }) {
+function BillsList({ items, onToggleBill, onToggleBillOccurrence, canEditData = true }: { items: BillListItem[]; onToggleBill: (key: string) => void; onToggleBillOccurrence?: (occurrenceId: string) => Promise<void>; canEditData?: boolean }) {
   if (items.length === 0) return <EmptySection message="Nenhuma conta nesta seção." />;
 
   return (
     <div className="utility-list">
       {items.map((item) => {
-        const paid = isBillPaid(item.toggleKey) || item.paid;
+        const paid = item.paid;
+        const isOverdue = !paid && item.kind === "planned" && item.date < dateKey(new Date());
         return (
           <article className="utility-row" key={item.id}>
             <div>
               <strong>{item.title}</strong>
               <small>
-                {item.category} · {item.owner} · {item.kind === "manual" ? "registrada" : "planejada"} · {item.dateLabel}
+                {item.category} · {item.owner} · {item.kind === "manual" ? "registrada" : isOverdue ? "atrasada" : "planejada"} · {item.dateLabel}
               </small>
+              {item.history && item.history.length > 0 && <small>{item.history.slice(-3).map((event) => `${event.action === "paid" ? "Pago" : "Reaberto"} ${formatDate(event.date)} · ${currency.format(event.amount)}`).join(" | ")}</small>}
             </div>
             <strong>{currency.format(item.amount)}</strong>
             <button
@@ -224,7 +241,9 @@ function BillsList({ items, onToggleBill, isBillPaid, canEditData = true }: { it
               type="button"
               disabled={!canEditData}
               aria-label={paid ? `Desmarcar ${item.title}` : `Marcar ${item.title} como paga`}
-              onClick={() => onToggleBill(item.toggleKey)}
+              onClick={() => item.occurrenceId && onToggleBillOccurrence
+                ? void onToggleBillOccurrence(item.occurrenceId)
+                : onToggleBill(item.toggleKey)}
             >
               {paid ? <Check size={17} /> : <span />}
             </button>
@@ -235,30 +254,136 @@ function BillsList({ items, onToggleBill, isBillPaid, canEditData = true }: { it
   );
 }
 
-function IncomeList({ items }: { items: IncomeListItem[] }) {
+function BillTemplateForm({
+  template,
+  onSave,
+}: {
+  template?: BillTemplate;
+  onSave: (bill: BillTemplate) => Promise<void>;
+}) {
+  const [error, setError] = useState("");
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    const startDate = String(values.get("startDate") ?? "");
+    const amount = Number(values.get("amount"));
+    const dueDateValue = new Date(`${startDate}T12:00:00`);
+    const bill: BillTemplate = {
+      id: template?.id ?? crypto.randomUUID(),
+      name: String(values.get("name") ?? "").trim(),
+      owner: String(values.get("owner") ?? "Você") as Movement["owner"],
+      amount,
+      category: String(values.get("category") ?? "Outros").trim(),
+      dueDay: dueDateValue.getDate(),
+      recurrence: String(values.get("recurrence") ?? "monthly") as BillTemplate["recurrence"],
+      startDate,
+      active: values.get("active") === "on",
+    };
+    if (!bill.name || !bill.category || !Number.isFinite(amount) || amount <= 0 || Number.isNaN(dueDateValue.getTime())) return;
+    try {
+      await onSave(bill);
+      setError("");
+    } catch {
+      setError("Não foi possível salvar a conta recorrente.");
+    }
+  };
+  return (
+    <form className="bill-template-form" onSubmit={(event) => void submit(event)}>
+      <label><span>Conta</span><input aria-label="Nome da conta" name="name" defaultValue={template?.name ?? ""} required /></label>
+      <label><span>Valor</span><input aria-label="Valor da conta" name="amount" type="number" min="0.01" step="0.01" defaultValue={template?.amount ?? ""} required /></label>
+      <label><span>Vencimento inicial</span><input aria-label="Vencimento inicial" name="startDate" type="date" defaultValue={template?.startDate ?? dateKey(new Date())} required /></label>
+      <label><span>Responsável</span><select name="owner" defaultValue={template?.owner ?? "Você"}><option value="Você">Você</option><option value="Esposa">Esposa</option><option value="Compartilhado">Compartilhado</option></select></label>
+      <label><span>Categoria</span><input aria-label="Categoria da conta" name="category" defaultValue={template?.category ?? "Casa"} required /></label>
+      <label><span>Recorrência</span><select name="recurrence" defaultValue={template?.recurrence ?? "monthly"}><option value="once">Uma vez</option><option value="biweekly">A cada duas semanas</option><option value="monthly">Mensal</option><option value="yearly">Anual</option></select></label>
+      <label className="bill-template-active"><input name="active" type="checkbox" defaultChecked={template?.active ?? true} /> Gerar próximos vencimentos</label>
+      <button className="outline-button" type="submit">{template ? "Salvar conta" : "Adicionar conta"}</button>
+      {error && <p className="movement-error" role="alert">{error}</p>}
+    </form>
+  );
+}
+
+function IncomeList({ items, onReceiveIncome }: { items: IncomeListItem[]; onReceiveIncome?: PlanningPageProps["onReceiveIncome"] }) {
+  const [receiptErrors, setReceiptErrors] = useState<Record<string, string>>({});
   if (items.length === 0) return <EmptySection message="Nenhuma receita nesta seção." />;
 
   return (
     <div className="utility-list">
       {items.map((item) => (
-        <article className="utility-row" key={item.id}>
+        <article className="utility-row income-planning-row" key={item.id}>
           <div>
             <strong>{item.title}</strong>
-            <small>
-              {item.category} · {item.owner} · {item.kind === "manual" ? "manual" : "planejada"} · {item.dateLabel}
-            </small>
+            <small>{item.category} · {item.owner} · {item.received ? "recebida" : "prevista"} · {item.dateLabel}</small>
           </div>
           <strong className="positive">{currency.format(item.amount)}</strong>
+          {item.kind === "planned" && !item.received && item.periodDate && item.recipient && onReceiveIncome && (
+            <form className="income-receipt-form" onSubmit={(event) => {
+              event.preventDefault();
+              const formData = new FormData(event.currentTarget);
+              const actualAmount = Number(formData.get("actualAmount"));
+              const receivedAt = String(formData.get("receivedAt") ?? "");
+              if (!Number.isFinite(actualAmount) || actualAmount <= 0 || !receivedAt) return;
+              void onReceiveIncome(item.periodDate!, item.recipient!, { actualAmount, receivedAt })
+                .then(() => setReceiptErrors((current) => ({ ...current, [item.id]: "" })))
+                .catch(() => setReceiptErrors((current) => ({ ...current, [item.id]: "Recebimento acima do previsto ou falha de sincronização." })));
+            }}>
+              <input aria-label={`Valor recebido de ${item.title}`} name="actualAmount" type="number" min="0.01" max={item.amount} step="0.01" defaultValue={item.amount} required />
+              <input aria-label={`Data recebida de ${item.title}`} name="receivedAt" type="date" defaultValue={dateKey(new Date())} required />
+              <button className="outline-button" type="submit">Registrar recebimento</button>
+              {receiptErrors[item.id] && <small className="movement-error" role="alert">{receiptErrors[item.id]}</small>}
+            </form>
+          )}
         </article>
       ))}
     </div>
   );
 }
 
-export function BillsPage({ movements, onToggleBill, isBillPaid, sharedEntryOverrides = {}, canEditData = true }: PlanningPageProps) {
+function PayPeriodForm({
+  period,
+  onSave,
+}: {
+  period?: EditablePayPeriod;
+  onSave: (period: EditablePayPeriod, previousDate?: string) => Promise<void>;
+}) {
+  const [error, setError] = useState("");
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    const date = String(values.get("date") ?? "");
+    const leandro = Number(values.get("leandro"));
+    const ketlin = Number(values.get("ketlin"));
+    if (!date || !Number.isFinite(leandro) || leandro < 0 || !Number.isFinite(ketlin) || ketlin < 0) return;
+    try {
+      await onSave({
+        date,
+        label: new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "long" }).format(new Date(`${date}T12:00:00`)),
+        income: { ...period?.income, leandro, ketlin, extras: period?.income.extras ?? 0, leiaUniversitySavings: period?.income.leiaUniversitySavings ?? 0 },
+        receivedIncome: period?.receivedIncome ?? {},
+      }, period?.date);
+      setError("");
+    } catch {
+      setError("Não foi possível salvar o período.");
+    }
+  };
+  return (
+    <form className="income-period-form" onSubmit={(event) => void submit(event)}>
+      <label><span>Data do pagamento</span><input aria-label="Data do pagamento" name="date" type="date" defaultValue={period?.date ?? dateKey(new Date())} required /></label>
+      <label><span>Previsto · Leandro</span><input aria-label="Pagamento previsto de Leandro" name="leandro" type="number" min="0" step="0.01" defaultValue={period?.income.leandro ?? 0} required /></label>
+      <label><span>Previsto · Ketlin</span><input aria-label="Pagamento previsto de Ketlin" name="ketlin" type="number" min="0" step="0.01" defaultValue={period?.income.ketlin ?? 0} required /></label>
+      <button className="outline-button" type="submit">{period ? "Salvar período" : "Adicionar período"}</button>
+      {error && <p className="movement-error" role="alert">{error}</p>}
+    </form>
+  );
+}
+
+export function BillsPage({ movements, periods = financePeriods, billTemplates = [], billOccurrences = [], onToggleBill, onCreateBillTemplate, onToggleBillOccurrence, isBillPaid, sharedEntryOverrides = {}, canEditData = true, planningError = "" }: PlanningPageProps) {
+  const [editingBillId, setEditingBillId] = useState<string | null>(null);
   const monthGroups = useMemo(() => {
-    const entries = resolveFinancialEntries(movements, sharedEntryOverrides);
-    const items: BillListItem[] = entries.filter((entry) => entry.type === "expense").map((entry) => ({
+    const entries = resolveFinancialEntries(movements, sharedEntryOverrides, periods);
+    const occurrencesById = new Map(billOccurrences.map((occurrence) => [occurrence.id, occurrence]));
+    const items: BillListItem[] = entries.filter((entry) => entry.type === "expense").map((entry) => {
+      const occurrence = entry.occurrenceId ? occurrencesById.get(entry.occurrenceId) : undefined;
+      return {
       id: entry.id,
       kind: entry.kind,
       title: entry.title,
@@ -268,10 +393,13 @@ export function BillsPage({ movements, onToggleBill, isBillPaid, sharedEntryOver
       date: entry.date,
       dateLabel: `${entry.kind === "planned" ? "vence em" : "lançada em"} ${formatDate(entry.date)}`,
       toggleKey: entry.toggleKey,
-      paid: isBillPaid(entry.toggleKey),
-    }));
+      paid: occurrence ? occurrence.status === "paid" : isBillPaid(entry.toggleKey),
+      occurrenceId: occurrence?.id,
+      paidAmount: occurrence?.paidAmount,
+      history: occurrence?.history,
+    }; });
     return groupItemsByMonth(items);
-  }, [movements, isBillPaid, sharedEntryOverrides]);
+  }, [billOccurrences, movements, periods, isBillPaid, sharedEntryOverrides]);
 
   const { expandedKey, setExpandedKey } = useExpandedMonth(monthGroups);
 
@@ -281,6 +409,15 @@ export function BillsPage({ movements, onToggleBill, isBillPaid, sharedEntryOver
       title="Contas e despesas"
       copy="No lançamento manual, selecione Despesa no campo Tipo. Contas previstas nos períodos financeiros aparecem como planejadas. Marque qualquer item como pago."
     >
+      {planningError && <p className="movement-error" role="alert">{planningError}</p>}
+      {onCreateBillTemplate && <BillTemplateForm onSave={onCreateBillTemplate} />}
+      {billTemplates.map((template) => (
+        <section className="bill-template-row" key={template.id}>
+          <div><strong>{template.name}</strong><small>{currency.format(template.amount)} · {template.owner} · {template.recurrence}</small></div>
+          {onCreateBillTemplate && <button className="outline-button" type="button" onClick={() => setEditingBillId((current) => current === template.id ? null : template.id)}>{editingBillId === template.id ? "Fechar" : "Editar"}</button>}
+          {editingBillId === template.id && onCreateBillTemplate && <BillTemplateForm key={`${template.id}-${template.name}-${template.amount}-${template.startDate}-${template.active}`} template={template} onSave={onCreateBillTemplate} />}
+        </section>
+      ))}
       {monthGroups.length === 0 ? (
         <div className="empty-state wide">Nenhuma conta ou despesa disponível.</div>
       ) : (
@@ -300,14 +437,14 @@ export function BillsPage({ movements, onToggleBill, isBillPaid, sharedEntryOver
                 copy="Movimentos manuais com tipo Despesa."
                 count={manualItems.length}
               >
-                <BillsList items={manualItems} onToggleBill={onToggleBill} isBillPaid={isBillPaid} canEditData={canEditData} />
+                <BillsList items={manualItems} onToggleBill={onToggleBill} onToggleBillOccurrence={onToggleBillOccurrence} canEditData={canEditData} />
               </SectionBlock>
               <SectionBlock
                 title="Contas planejadas"
                 copy="Contas cadastradas nos períodos financeiros; o vencimento define a data."
                 count={plannedItems.length}
               >
-                <BillsList items={plannedItems} onToggleBill={onToggleBill} isBillPaid={isBillPaid} canEditData={canEditData} />
+                <BillsList items={plannedItems} onToggleBill={onToggleBill} onToggleBillOccurrence={onToggleBillOccurrence} canEditData={canEditData} />
               </SectionBlock>
             </MonthAccordion>
           );
@@ -317,9 +454,9 @@ export function BillsPage({ movements, onToggleBill, isBillPaid, sharedEntryOver
   );
 }
 
-export function IncomePage({ movements, sharedEntryOverrides = {} }: PlanningPageProps) {
+export function IncomePage({ movements, periods = financePeriods, sharedEntryOverrides = {}, onCreatePayPeriod, onReceiveIncome, planningError = "" }: PlanningPageProps) {
   const monthGroups = useMemo(() => {
-    const entries = resolveFinancialEntries(movements, sharedEntryOverrides);
+    const entries = resolveFinancialEntries(movements, sharedEntryOverrides, periods);
     const items: IncomeListItem[] = entries.filter((entry) => entry.type === "income").map((entry) => ({
       id: entry.id,
       kind: entry.kind,
@@ -329,9 +466,12 @@ export function IncomePage({ movements, sharedEntryOverrides = {} }: PlanningPag
       owner: entry.owner,
       date: entry.date,
       dateLabel: formatDate(entry.date),
+        received: entry.received,
+        periodDate: entry.periodDate,
+        recipient: entry.incomeRecipient,
     }));
     return groupItemsByMonth(items);
-  }, [movements, sharedEntryOverrides]);
+  }, [movements, periods, sharedEntryOverrides]);
 
   const { expandedKey, setExpandedKey } = useExpandedMonth(monthGroups);
 
@@ -339,8 +479,10 @@ export function IncomePage({ movements, sharedEntryOverrides = {} }: PlanningPag
     <PageFrame
       eyebrow="Planejamento"
       title="Receitas"
-      copy="As entradas manuais vêm dos lançamentos salvos nesta conta. Os pagamentos planejados mostram as receitas previstas de Você e Esposa."
+      copy="Registre períodos, previsões e recebimentos reais. O valor previsto diminui conforme cada recebimento é lançado."
     >
+      {planningError && <p className="movement-error" role="alert">{planningError}</p>}
+      {onCreatePayPeriod && <PayPeriodForm onSave={onCreatePayPeriod} />}
       {monthGroups.length === 0 ? (
         <div className="empty-state wide">Nenhuma receita disponível.</div>
       ) : (
@@ -355,6 +497,9 @@ export function IncomePage({ movements, sharedEntryOverrides = {} }: PlanningPag
               isOpen={isOpen}
               onToggle={() => setExpandedKey((current) => (current === group.key ? null : group.key))}
             >
+              {onCreatePayPeriod && periods.filter((period) => period.date.startsWith(group.key)).map((period) => (
+                <PayPeriodForm key={period.date} period={period} onSave={onCreatePayPeriod} />
+              ))}
               <SectionBlock
                 title="Entradas manuais"
                 copy="Receitas adicionadas manualmente e identificadas pelo responsável do lançamento."
@@ -367,7 +512,7 @@ export function IncomePage({ movements, sharedEntryOverrides = {} }: PlanningPag
                 copy="Receitas previstas no calendário financeiro, separadas por pessoa."
                 count={plannedItems.length}
               >
-                <IncomeList items={plannedItems} />
+                <IncomeList items={plannedItems} onReceiveIncome={onReceiveIncome} />
               </SectionBlock>
             </MonthAccordion>
           );
@@ -377,7 +522,7 @@ export function IncomePage({ movements, sharedEntryOverrides = {} }: PlanningPag
   );
 }
 
-export function GoalsPage({ movements, user, displayName, sharedEntryOverrides = {}, goals = [], goalsSyncError = "", onCreateGoal, onDeleteGoal, onContributeGoal }: PlanningPageProps) {
+export function GoalsPage({ movements, periods = financePeriods, user, displayName, sharedEntryOverrides = {}, goals = [], goalsSyncError = "", onCreateGoal, onDeleteGoal, onContributeGoal }: PlanningPageProps) {
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
   const [contributionAmounts, setContributionAmounts] = useState<Record<string, string>>({});
@@ -394,8 +539,8 @@ export function GoalsPage({ movements, user, displayName, sharedEntryOverrides =
     };
   }, [displayName, user?.displayName, user?.email]);
   const financialEntries = useMemo(
-    () => resolveFinancialEntries(movements, sharedEntryOverrides),
-    [movements, sharedEntryOverrides],
+    () => resolveFinancialEntries(movements, sharedEntryOverrides, periods),
+    [movements, periods, sharedEntryOverrides],
   );
   const contributions = goals.flatMap((goal) => goal.contributions);
   const ledger = calculateFinanceLedger(financialEntries, contributions, currentDateKey);

@@ -1,8 +1,52 @@
-import type { SeedBill } from "../data/financeSeed";
+import type { SeedBill, SeedPayPeriod } from "../data/financeSeed";
 
 export type Owner = "Você" | "Esposa" | "Compartilhado";
 export type Bill = SeedBill;
 export type Recurrence = "none" | "biweekly" | "monthly" | "yearly";
+export type BillRecurrence = "once" | "biweekly" | "monthly" | "yearly";
+export type IncomeRecipient = "leandro" | "ketlin";
+
+export type ReceivedPayment = {
+  actualAmount: number;
+  receivedAt: string;
+};
+
+export type BillPaymentEvent = {
+  id: string;
+  date: string;
+  amount: number;
+  action: "paid" | "reopened";
+};
+
+export type BillOccurrence = {
+  id: string;
+  billId: string;
+  periodDate: string;
+  dueDate: string;
+  name: string;
+  owner: Owner;
+  amount: number;
+  category: string;
+  status: "planned" | "paid";
+  paidAt?: string;
+  paidAmount?: number;
+  history: BillPaymentEvent[];
+};
+
+export type BillTemplate = {
+  id: string;
+  name: string;
+  owner: Owner;
+  amount: number;
+  category: string;
+  dueDay: number;
+  recurrence: BillRecurrence;
+  startDate: string;
+  active: boolean;
+};
+
+export type EditablePayPeriod = Omit<SeedPayPeriod, "bills">;
+export type PayPeriod = EditablePayPeriod;
 
 export type Movement = {
   id: string;
