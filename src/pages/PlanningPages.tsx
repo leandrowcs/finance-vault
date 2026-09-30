@@ -1,8 +1,7 @@
 import { ChevronDown, Check, LogOut, Plus, Target, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
-import { financePeriods } from "../data/financeSeed";
-import { currency, dateKey, dueDate } from "../lib/finance";
+import { calculateFinanceLedger, currency, dateKey, resolveFinancialEntries } from "../lib/finance";
 import type { Goal, GoalIncomeSource, HouseholdInvite, HouseholdMember, MemberAccessLevel, Movement } from "../types/finance";
 
 type EntryOverride = Partial<Movement> & { deleted?: boolean };
@@ -258,45 +257,20 @@ function IncomeList({ items }: { items: IncomeListItem[] }) {
 
 export function BillsPage({ movements, onToggleBill, isBillPaid, sharedEntryOverrides = {}, canEditData = true }: PlanningPageProps) {
   const monthGroups = useMemo(() => {
-    const plannedItems: BillListItem[] = financePeriods.flatMap((period) =>
-      period.bills.flatMap((bill) => {
-        const override = sharedEntryOverrides[`period-expense:${period.date}:${bill.id}`];
-        if (override?.deleted) return [];
-        const date = override?.date ?? dateKey(dueDate(period.date, bill.due));
-        return [{
-          id: `period:${period.date}:${bill.id}`,
-          kind: "planned" as const,
-          title: override?.description ?? bill.name,
-          amount: override?.amount ?? bill.amount,
-          category: override?.category ?? bill.category,
-          owner: override?.owner ?? bill.owner,
-          date,
-          dateLabel: `vence em ${formatDate(date)}`,
-          toggleKey: `period:${period.date}:${bill.id}`,
-          paid: isBillPaid(`period:${period.date}:${bill.id}`),
-        }];
-      }),
-    );
-    const manualItems: BillListItem[] = movements
-      .map((movement) => ({
-        ...movement,
-        ...sharedEntryOverrides[`movement:${movement.id}`],
-      }))
-      .filter((movement) => !movement.deleted && movement.type === "expense")
-      .map((movement) => ({
-        id: movement.id,
-        kind: "manual" as const,
-        title: movement.description || "Despesa sem descrição",
-        amount: movement.amount,
-        category: movement.category,
-        owner: movement.owner,
-        date: movement.date,
-        dateLabel: `lançada em ${formatDate(movement.date)}`,
-        toggleKey: `movement:${movement.id}`,
-        paid: isBillPaid(`movement:${movement.id}`),
-      }));
-
-    return groupItemsByMonth([...plannedItems, ...manualItems]);
+    const entries = resolveFinancialEntries(movements, sharedEntryOverrides);
+    const items: BillListItem[] = entries.filter((entry) => entry.type === "expense").map((entry) => ({
+      id: entry.id,
+      kind: entry.kind,
+      title: entry.title,
+      amount: entry.amount,
+      category: entry.category,
+      owner: entry.owner,
+      date: entry.date,
+      dateLabel: `${entry.kind === "planned" ? "vence em" : "lançada em"} ${formatDate(entry.date)}`,
+      toggleKey: entry.toggleKey,
+      paid: isBillPaid(entry.toggleKey),
+    }));
+    return groupItemsByMonth(items);
   }, [movements, isBillPaid, sharedEntryOverrides]);
 
   const { expandedKey, setExpandedKey } = useExpandedMonth(monthGroups);
@@ -345,56 +319,18 @@ export function BillsPage({ movements, onToggleBill, isBillPaid, sharedEntryOver
 
 export function IncomePage({ movements, sharedEntryOverrides = {} }: PlanningPageProps) {
   const monthGroups = useMemo(() => {
-    const plannedItems: IncomeListItem[] = financePeriods.flatMap((period) => {
-      const leandroOverride = sharedEntryOverrides[`period-income:${period.date}:leandro`];
-      const ketlinOverride = sharedEntryOverrides[`period-income:${period.date}:ketlin`];
-      const items: IncomeListItem[] = [];
-      if (!leandroOverride?.deleted) {
-        const date = leandroOverride?.date ?? period.date;
-        items.push({
-          id: `period-income:${period.date}:leandro`,
-          kind: "planned",
-          title: leandroOverride?.description ?? "Pagamento planejado · Você",
-          amount: leandroOverride?.amount ?? period.income.leandro,
-          category: leandroOverride?.category ?? "Salário",
-          owner: leandroOverride?.owner ?? "Você",
-          date,
-          dateLabel: formatDate(date),
-        });
-      }
-      if (!ketlinOverride?.deleted) {
-        const date = ketlinOverride?.date ?? period.date;
-        items.push({
-          id: `period-income:${period.date}:ketlin`,
-          kind: "planned",
-          title: ketlinOverride?.description ?? "Pagamento planejado · Esposa",
-          amount: ketlinOverride?.amount ?? period.income.ketlin,
-          category: ketlinOverride?.category ?? "Salário",
-          owner: ketlinOverride?.owner ?? "Esposa",
-          date,
-          dateLabel: formatDate(date),
-        });
-      }
-      return items;
-    });
-    const manualItems: IncomeListItem[] = movements
-      .map((movement) => ({
-        ...movement,
-        ...sharedEntryOverrides[`movement:${movement.id}`],
-      }))
-      .filter((movement) => !movement.deleted && movement.type === "income")
-      .map((movement) => ({
-        id: movement.id,
-        kind: "manual" as const,
-        title: movement.description || "Receita sem descrição",
-        amount: movement.amount,
-        category: movement.category,
-        owner: movement.owner,
-        date: movement.date,
-        dateLabel: formatDate(movement.date),
-      }));
-
-    return groupItemsByMonth([...plannedItems, ...manualItems]);
+    const entries = resolveFinancialEntries(movements, sharedEntryOverrides);
+    const items: IncomeListItem[] = entries.filter((entry) => entry.type === "income").map((entry) => ({
+      id: entry.id,
+      kind: entry.kind,
+      title: entry.title,
+      amount: entry.amount,
+      category: entry.category,
+      owner: entry.owner,
+      date: entry.date,
+      dateLabel: formatDate(entry.date),
+    }));
+    return groupItemsByMonth(items);
   }, [movements, sharedEntryOverrides]);
 
   const { expandedKey, setExpandedKey } = useExpandedMonth(monthGroups);
@@ -457,121 +393,40 @@ export function GoalsPage({ movements, user, displayName, sharedEntryOverrides =
       "Esposa": wifeIsLoggedIn ? displayName : "Ketlin",
     };
   }, [displayName, user?.displayName, user?.email]);
-  const { monthlyBalances, hasUnassignedContributions } = useMemo(() => {
-    const monthMovements = movements
-      .map((movement) => ({ ...movement, ...sharedEntryOverrides[`movement:${movement.id}`] }))
-      .filter((movement) => !movement.deleted && movement.date.startsWith(currentMonthKey));
-    const manualReceivedSources = monthMovements
-      .filter((movement) => movement.type === "income" && movement.date <= currentDateKey && movement.owner !== "Compartilhado")
-      .map((movement) => ({
-        id: movement.id,
-        owner: movement.owner as "Você" | "Esposa",
-        date: movement.date,
-        amount: movement.amount,
-      }));
-    const plannedReceivedSources = financePeriods
-      .filter((period) => period.date.startsWith(currentMonthKey))
-      .flatMap((period) => ([
-        {
-          id: `period-income:${period.date}:leandro`,
-          owner: "Você" as const,
-          amount: sharedEntryOverrides[`period-income:${period.date}:leandro`]?.amount ?? period.income.leandro,
-          date: sharedEntryOverrides[`period-income:${period.date}:leandro`]?.date ?? period.date,
-          deleted: sharedEntryOverrides[`period-income:${period.date}:leandro`]?.deleted,
-        },
-        {
-          id: `period-income:${period.date}:ketlin`,
-          owner: "Esposa" as const,
-          amount: sharedEntryOverrides[`period-income:${period.date}:ketlin`]?.amount ?? period.income.ketlin,
-          date: sharedEntryOverrides[`period-income:${period.date}:ketlin`]?.date ?? period.date,
-          deleted: sharedEntryOverrides[`period-income:${period.date}:ketlin`]?.deleted,
-        },
-      ]).filter((source) => !source.deleted && source.date.startsWith(currentMonthKey) && source.date <= currentDateKey)
-        .map(({ deleted: _deleted, ...source }) => source));
-    const receivedSources = [...plannedReceivedSources, ...manualReceivedSources];
-    const receivedByOwner = receivedSources.reduce<Record<"Você" | "Esposa", number>>(
-      (totals, source) => ({ ...totals, [source.owner]: totals[source.owner] + source.amount }),
-      { "Você": 0, "Esposa": 0 },
-    );
-    const sharedIncome = monthMovements
-      .filter((movement) => movement.type === "income" && movement.owner === "Compartilhado" && movement.date <= currentDateKey)
-      .reduce((total, movement) => total + movement.amount / 2, 0);
-    receivedByOwner["Você"] += sharedIncome;
-    receivedByOwner.Esposa += sharedIncome;
-    const addExpense = (totals: Record<"Você" | "Esposa", number>, owner: Movement["owner"], amount: number) => {
-      if (owner === "Compartilhado") {
-        return { "Você": totals["Você"] + amount / 2, "Esposa": totals.Esposa + amount / 2 };
-      }
-      return { ...totals, [owner]: totals[owner] + amount };
-    };
-    const movementExpenses = monthMovements
-      .filter((movement) => movement.type === "expense")
-      .reduce((totals, movement) => addExpense(totals, movement.owner, movement.amount), { "Você": 0, "Esposa": 0 });
-    const plannedExpenses = financePeriods
-      .filter((period) => period.date.startsWith(currentMonthKey))
-      .flatMap((period) => period.bills.flatMap((bill) => {
-        const override = sharedEntryOverrides[`period-expense:${period.date}:${bill.id}`];
-        if (override?.deleted) return [];
-        const date = override?.date ?? dateKey(dueDate(period.date, bill.due));
-        if (!date.startsWith(currentMonthKey)) return [];
-        return [{ owner: override?.owner ?? bill.owner, amount: override?.amount ?? bill.amount }];
-      }));
-    const expenseByOwner = plannedExpenses.reduce(
-      (totals, expense) => addExpense(totals, expense.owner, expense.amount),
-      movementExpenses,
-    );
-    const sourceOwnerById = new Map(receivedSources.map((source) => [source.id, source.owner]));
-    const contributions = goals.flatMap((goal) => goal.contributions).filter((contribution) =>
+  const financialEntries = useMemo(
+    () => resolveFinancialEntries(movements, sharedEntryOverrides),
+    [movements, sharedEntryOverrides],
+  );
+  const contributions = goals.flatMap((goal) => goal.contributions);
+  const ledger = calculateFinanceLedger(financialEntries, contributions, currentDateKey);
+  const currentMonth = ledger.get(currentMonthKey);
+  const hasUnassignedContributions = contributions.some((contribution) =>
+    !contribution.incomeSourceId && (contribution.incomeSourceDate ?? contribution.date).startsWith(currentMonthKey),
+  );
+  const monthlyBalances = ( ["Você", "Esposa"] as const).map((owner) => {
+    const id = `income-balance:${owner}:${currentMonthKey}`;
+    const ownerContributions = contributions.filter((contribution) =>
+      (contribution.incomeSourceOwner === owner || (!contribution.incomeSourceOwner && !contribution.incomeSourceId)) &&
       (contribution.incomeSourceDate ?? contribution.date).startsWith(currentMonthKey),
     );
-    const ownerForContribution = (contribution: Goal["contributions"][number]) =>
-      contribution.incomeSourceOwner ?? (contribution.incomeSourceId ? sourceOwnerById.get(contribution.incomeSourceId) : undefined);
-    const unassignedContributions = contributions.filter((contribution) => !ownerForContribution(contribution));
-    const ownerOrder = (["Você", "Esposa"] as const).slice().sort((left, right) => {
-      const firstLeftIncome = receivedSources.find((source) => source.owner === left)?.date ?? "9999-12-31";
-      const firstRightIncome = receivedSources.find((source) => source.owner === right)?.date ?? "9999-12-31";
-      return firstLeftIncome.localeCompare(firstRightIncome);
-    });
-    const legacyReservations = ownerOrder.reduce<{
-      remaining: number;
-      byOwner: Record<"Você" | "Esposa", number>;
-    }>((state, owner) => {
-      const balance = Math.max(0, receivedByOwner[owner] - expenseByOwner[owner]);
-      const reserved = Math.min(state.remaining, balance);
-      return {
-        remaining: state.remaining - reserved,
-        byOwner: { ...state.byOwner, [owner]: reserved },
-      };
-    }, {
-      remaining: unassignedContributions.reduce((total, contribution) => total + contribution.amount, 0),
-      byOwner: { "Você": 0, "Esposa": 0 },
-    });
-    const monthlyBalances = (["Você", "Esposa"] as const).map((owner) => {
-      const id = `income-balance:${owner}:${currentMonthKey}`;
-      const ownerContributions = contributions.filter((contribution) => ownerForContribution(contribution) === owner);
-      const currentBalanceAllocations = ownerContributions
-        .filter((contribution) => contribution.incomeSourceId === id)
-        .reduce((total, contribution) => total + contribution.amount, 0);
-      const previousAllocations = ownerContributions
-        .filter((contribution) => contribution.incomeSourceId !== id)
-        .reduce((total, contribution) => total + contribution.amount, 0);
-      const amount = Math.max(0, receivedByOwner[owner] - expenseByOwner[owner]);
-      const legacyReserved = previousAllocations + legacyReservations.byOwner[owner];
-      return {
-        id,
-        label: `${ownerLabels[owner]} · saldo de ${currentMonthLabel}`,
-        amount,
-        date: currentDateKey,
-        owner,
-        receivedAmount: receivedByOwner[owner],
-        expenseAmount: expenseByOwner[owner],
-        allocatedAmount: currentBalanceAllocations + previousAllocations + legacyReservations.byOwner[owner],
-        legacyReserved,
-        available: Math.max(0, amount - legacyReserved - currentBalanceAllocations),
-      };
-    });
-    return { monthlyBalances, hasUnassignedContributions: unassignedContributions.length > 0 };
-  }, [currentDateKey, currentMonthKey, currentMonthLabel, goals, movements, ownerLabels, sharedEntryOverrides]);
+    const currentAllocations = ownerContributions
+      .filter((contribution) => contribution.incomeSourceId === id)
+      .reduce((total, contribution) => total + contribution.amount, 0);
+    const available = currentMonth?.availableByOwner[owner] ?? 0;
+    const allocated = currentMonth?.goalContributionsByOwner[owner] ?? 0;
+    return {
+      id,
+      label: `${ownerLabels[owner]} · saldo de ${currentMonthLabel}`,
+      amount: available + allocated,
+      date: currentDateKey,
+      owner,
+      receivedAmount: currentMonth?.receivedByOwner[owner] ?? 0,
+      expenseAmount: currentMonth?.expenseByOwner[owner] ?? 0,
+      allocatedAmount: allocated,
+      legacyReserved: Math.max(0, allocated - currentAllocations),
+      available,
+    };
+  });
 
   const addGoal = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

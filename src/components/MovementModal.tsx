@@ -17,9 +17,10 @@ type MovementModalProps = {
   onSubmit: (movement: Movement) => void;
   initialMovement?: Movement;
   onDelete?: () => void;
+  submissionError?: string;
 };
 
-export function MovementModal({ onClose, onSubmit, initialMovement, onDelete }: MovementModalProps) {
+export function MovementModal({ onClose, onSubmit, initialMovement, onDelete, submissionError = "" }: MovementModalProps) {
   const [form, setForm] = useState<FormState>(() => initialMovement ? { ...initialMovement, recurrence: "none", recurrenceCount: 1 } : initialForm);
   const [error, setError] = useState("");
   const categories = form.type === "income" ? incomeCategories : expenseCategories;
@@ -71,7 +72,7 @@ export function MovementModal({ onClose, onSubmit, initialMovement, onDelete }: 
               ))}
             </div>
           </div>
-          {error && <p className="movement-error">{error}</p>}
+          {(error || submissionError) && <p className="movement-error" role="alert">{error || submissionError}</p>}
           <div className={onDelete && isEditing ? "movement-form-actions" : ""}><button className="solid-button objective-button movement-submit" type="submit">{isEditing ? "Salvar alterações" : "Adicionar movimento"}</button>{onDelete && isEditing && <button className="entry-delete-button movement-delete-button" type="button" onClick={onDelete}>Excluir lançamento</button>}</div>
         </form>
       </section>

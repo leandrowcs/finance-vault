@@ -225,6 +225,39 @@
   place-items: center;
   padding: 20px;
 }
+.income-conflict-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.income-conflict-options {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0;
+}
+.income-conflict-options label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  font-size: 11px;
+}
+.income-conflict-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.income-conflict-actions button:first-child {
+  grid-column: 1 / -1;
+  justify-content: center;
+}
 .movement-modal {
   position: relative;
   width: min(100%, 480px);
@@ -371,6 +404,12 @@
   }
   .movement-modal {
     padding: 10px;
+  }
+  .income-conflict-layer {
+    padding: 10px;
+  }
+  .income-conflict-actions {
+    grid-template-columns: 1fr;
   }
   .movement-fields-row {
     grid-template-columns: 1fr;

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
 import { arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, writeBatch } from "firebase/firestore";
-import { financePeriods, totalIncome } from "./data/financeSeed";
+import { financePeriods } from "./data/financeSeed";
 import { AppNavigation, type NavigationView } from "./components/AppNavigation";
 import { AppTopbar } from "./components/AppTopbar";
 import { ProfileModal } from "./components/ProfileModal";
@@ -9,18 +9,64 @@ import { MovementModal } from "./components/MovementModal";
 import { CalendarPage } from "./pages/CalendarPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { BillsPage, GoalsPage, IncomePage, MembersPage, SettingsPage } from "./pages/PlanningPages";
-import { dateKey, dueDate, nextPaymentPeriod } from "./lib/finance";
+import { dateKey, findPlannedIncomeMatches, nextPaymentPeriod, resolveFinancialEntries, type FinancialEntry, type FinanceOverrides } from "./lib/finance";
 import { db } from "./lib/firebase";
 import type { CalendarItem, Goal, GoalContribution, GoalIncomeSource, HouseholdInvite, HouseholdMember, MemberAccessLevel, Movement } from "./types/finance";
 import "./App.css";
 
 type AppProps = { user?: User | null; onSignOut?: () => Promise<void> };
-type EntryOverrides = Record<string, Partial<Movement> & { deleted?: boolean }>;
+type EntryOverrides = FinanceOverrides;
 type DataUser = Pick<User, "uid"> | null;
+
+type IncomeConflict = { movement: Movement; matches: FinancialEntry[] };
+
+function IncomeConflictDialog({
+  conflict,
+  selectedKey,
+  error,
+  onSelect,
+  onReplace,
+  onAddExtra,
+  onCancel,
+}: {
+  conflict: IncomeConflict;
+  selectedKey: string;
+  error: string;
+  onSelect: (key: string) => void;
+  onReplace: () => void;
+  onAddExtra: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="income-conflict-layer">
+      <button className="profile-modal-backdrop" type="button" aria-label="Voltar ao lançamento" onClick={onCancel} />
+      <section className="movement-modal income-conflict-modal" role="dialog" aria-modal="true" aria-labelledby="income-conflict-title">
+        <p className="eyebrow">RECEITA SEMELHANTE</p>
+        <h2 id="income-conflict-title">Pagamento previsto nesta data</h2>
+        <p className="heading-copy">Este valor já aparece como previsto. Substitua um pagamento ou registre como receita extra.</p>
+        <div className="income-conflict-options" role="radiogroup" aria-label="Pagamento previsto para substituir">
+          {conflict.matches.map((match) => (
+            <label key={match.key}>
+              <input type="radio" name="planned-income-match" value={match.key} checked={selectedKey === match.key} onChange={() => onSelect(match.key)} />
+              <span>{match.title} · {match.owner} · {conflictDateFormatter.format(new Date(`${match.date}T12:00:00`))}</span>
+            </label>
+          ))}
+        </div>
+        {error && <p className="movement-error" role="alert">{error}</p>}
+        <div className="income-conflict-actions">
+          <button className="outline-button" type="button" onClick={onCancel}>Voltar</button>
+          <button className="outline-button" type="button" onClick={onAddExtra}>Registrar como extra</button>
+          <button className="solid-button" type="button" disabled={!selectedKey} onClick={onReplace}>Substituir previsto</button>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 const openedAt = new Date();
 const greeting = openedAt.getHours() < 12 ? "Bom dia" : openedAt.getHours() < 18 ? "Boa tarde" : "Boa noite";
 const openedDateLabel = new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "numeric", month: "long" }).format(openedAt);
+const conflictDateFormatter = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
 
 function viewFromHash(): NavigationView {
   const hash = typeof window !== "undefined" ? window.location.hash.slice(1) : "dashboard";
@@ -180,6 +226,10 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const [signOutError, setSignOutError] = useState("");
   const [movements, setMovements] = useState<Movement[]>([]);
   const [isMovementModalOpen, setIsMovementModalOpen] = useState(false);
+  const [incomeConflict, setIncomeConflict] = useState<IncomeConflict | null>(null);
+  const [selectedPlannedIncomeKey, setSelectedPlannedIncomeKey] = useState("");
+  const [incomeConflictError, setIncomeConflictError] = useState("");
+  const [movementSaveError, setMovementSaveError] = useState("");
   const [movementsLoaded, setMovementsLoaded] = useState(false);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [goalsLoaded, setGoalsLoaded] = useState(false);
@@ -464,28 +514,109 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   }, [dataOwnerUid, householdLoaded]);
   const canEditData = accessLevel !== "read";
   const canDeleteData = accessLevel === "delete" || accessLevel === "owner";
-  const saveMovement = async (movement: Movement) => {
-    if (!canEditData) return;
+  const saveMovement = async (movement: Movement, replacedPlannedIncomeKeys: string[] = []) => {
+    if (!canEditData) return false;
     const savedMovements = expandRecurringMovement(movement);
     const savedIds = new Set(savedMovements.map((item) => item.id));
     const nextMovements = [...movements.filter((item) => !savedIds.has(item.id) && item.id !== movement.id), ...savedMovements];
+    const nextEntryOverrides = { ...(entryOverrides ?? {}) };
+    replacedPlannedIncomeKeys.forEach((key) => {
+      nextEntryOverrides[key] = {
+        ...nextEntryOverrides[key],
+        deleted: true,
+        replacedByMovementId: movement.id,
+      };
+    });
+    const normalizedOverrides = normalizeEntryOverrides(nextEntryOverrides);
+    if (dataUser && db) {
+      const batch = writeBatch(db);
+      savedMovements.forEach((savedMovement) => {
+        batch.set(doc(db!, "users", dataUser.uid, "movements", savedMovement.id), savedMovement);
+      });
+      if (replacedPlannedIncomeKeys.length > 0) {
+        batch.set(sharedStateRef(dataUser), { entryOverrides: normalizedOverrides }, { merge: true });
+      }
+      try {
+        await batch.commit();
+      } catch {
+        return false;
+      }
+    }
     setMovements(nextMovements);
     localStorage.setItem(movementsStorageKey(dataUser), JSON.stringify(nextMovements));
-    if (dataUser && db) {
-      try { await Promise.all(savedMovements.map((savedMovement) => setDoc(doc(db!, "users", dataUser.uid, "movements", savedMovement.id), savedMovement))); } catch { return; }
+    if (replacedPlannedIncomeKeys.length > 0) {
+      setEntryOverrides(normalizedOverrides);
+      localStorage.setItem(entryOverridesStorageKey(dataUser), JSON.stringify(normalizedOverrides));
+    }
+    return true;
+  };
+  const submitMovement = (movement: Movement) => {
+    setMovementSaveError("");
+    const matches = findPlannedIncomeMatches(
+      movement,
+      resolveFinancialEntries(movements, entryOverrides ?? {}),
+    );
+    if (matches.length > 0) {
+      setIncomeConflict({ movement, matches });
+      setSelectedPlannedIncomeKey(matches.length === 1 ? matches[0].key : "");
+      setIncomeConflictError("");
       return;
     }
+    void saveMovement(movement).then((saved) => {
+      if (!saved) {
+        setMovementSaveError("Não foi possível salvar. Verifique a sincronização e tente novamente.");
+        return;
+      }
+      setBillPaidState((current) => ({ ...current, [movementBillKey(movement.id)]: false }));
+      setIsMovementModalOpen(false);
+    });
+  };
+  const finishIncomeConflict = (replacePlanned: boolean) => {
+    if (!incomeConflict) return;
+    const replacedKeys = replacePlanned ? [selectedPlannedIncomeKey] : [];
+    if (replacePlanned && !selectedPlannedIncomeKey) return;
+    void saveMovement(incomeConflict.movement, replacedKeys).then((saved) => {
+      if (!saved) {
+        setIncomeConflictError("Não foi possível salvar. Verifique a sincronização e tente novamente.");
+        return;
+      }
+      setBillPaidState((current) => ({ ...current, [movementBillKey(incomeConflict.movement.id)]: false }));
+      setIncomeConflict(null);
+      setIsMovementModalOpen(false);
+    });
   };
   const deleteMovement = async (movementId: string) => {
     if (!canDeleteData) return;
+    const replacedKeys = Object.entries(entryOverrides ?? {})
+      .filter(([, override]) => override.replacedByMovementId === movementId)
+      .map(([key]) => key);
+    const nextEntryOverrides = { ...(entryOverrides ?? {}) };
+    delete nextEntryOverrides[`movement:${movementId}`];
+    delete nextEntryOverrides[movementId];
+    replacedKeys.forEach((key) => { delete nextEntryOverrides[key]; });
+    const normalizedOverrides = normalizeEntryOverrides(nextEntryOverrides);
+    const overridesChanged = JSON.stringify(normalizedOverrides) !== JSON.stringify(entryOverrides ?? {});
+    if (dataUser && db) {
+      const batch = writeBatch(db);
+      batch.delete(doc(db, "users", dataUser.uid, "movements", movementId));
+      if (overridesChanged) {
+        batch.set(sharedStateRef(dataUser), { entryOverrides: normalizedOverrides }, { merge: true });
+      }
+      try {
+        await batch.commit();
+      } catch {
+        return;
+      }
+    }
     const deletedMovementIds = readDeletedMovementIds(dataUser);
     deletedMovementIds.add(movementId);
     localStorage.setItem(deletedMovementsStorageKey(dataUser), JSON.stringify([...deletedMovementIds]));
     const nextMovements = movements.filter((movement) => movement.id !== movementId);
     setMovements(nextMovements);
     localStorage.setItem(movementsStorageKey(dataUser), JSON.stringify(nextMovements));
-    if (dataUser && db) {
-      try { await deleteDoc(doc(db, "users", dataUser.uid, "movements", movementId)); } catch { return; }
+    if (overridesChanged) {
+      setEntryOverrides(normalizedOverrides);
+      localStorage.setItem(entryOverridesStorageKey(dataUser), JSON.stringify(normalizedOverrides));
     }
   };
   const saveEntryOverrides = async (nextEntryOverrides: EntryOverrides) => {
@@ -666,13 +797,16 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const calendarItems = useMemo(() => {
     const items = new Map<string, CalendarItem[]>();
     const addItem = (date: string, item: CalendarItem) => items.set(date, [...(items.get(date) ?? []), item]);
-    financePeriods.forEach((period) => {
-      addItem(period.date, { type: "income", title: "Receita do período", detail: period.label, amount: totalIncome(period) });
-      period.bills.forEach((bill) => addItem(dateKey(dueDate(period.date, bill.due)), { type: "bill", title: bill.name, detail: `${bill.category} · ${bill.owner}`, amount: bill.amount }));
+    resolveFinancialEntries(movements, entryOverrides ?? {}).forEach((entry) => {
+      addItem(entry.date, {
+        type: entry.type === "income" ? "income" : "bill",
+        title: entry.title,
+        detail: `${entry.category} · ${entry.owner}`,
+        amount: entry.amount,
+      });
     });
-    movements.forEach((movement) => addItem(dateKey(new Date(`${movement.date}T12:00:00`)), { type: movement.type === "income" ? "income" : "bill", title: movement.description, detail: `${movement.category} · ${movement.owner}`, amount: movement.amount }));
     return items;
-  }, [movements]);
+  }, [entryOverrides, movements]);
   const displayName = user?.displayName || user?.email || "Usuário";
   const initials = displayName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
   const nextPaymentDate = new Date(`${nextPaymentPeriod.date}T12:00:00`);
@@ -717,7 +851,7 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const pageContent = activeView === "payments"
     ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} />
     : activeView === "dashboard"
-      ? <DashboardPage movements={movements} goals={goals} canEditData={canEditData} canDeleteData={canDeleteData} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onSaveMovement={(movement) => { void saveMovement(movement); }} sharedEntryOverrides={entryOverrides} onEntryOverridesChange={(overrides) => { void saveEntryOverrides(overrides); }} onOpenCalendar={() => changeView("payments")} onOpenMovement={() => { if (canEditData) setIsMovementModalOpen(true); }} storageKey={dataOwnerUid ?? "local"} />
+      ? <DashboardPage movements={movements} goals={goals} canEditData={canEditData} canDeleteData={canDeleteData} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onSaveMovement={submitMovement} sharedEntryOverrides={entryOverrides} onEntryOverridesChange={(overrides) => { void saveEntryOverrides(overrides); }} onOpenCalendar={() => changeView("payments")} onOpenMovement={() => { if (canEditData) setIsMovementModalOpen(true); }} storageKey={dataOwnerUid ?? "local"} />
       : activeView === "bills" ? <BillsPage {...planningPageProps} />
         : activeView === "income" ? <IncomePage {...planningPageProps} />
           : activeView === "goals" ? <GoalsPage {...planningPageProps} />
@@ -725,5 +859,28 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
               : <SettingsPage {...planningPageProps} />;
 
   if (!householdLoaded || !movementsLoaded || !goalsLoaded) return null;
-  return <main className="app-shell"><AppNavigation isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} activeView={activeView} onNavigate={changeView} /><section className="content"><AppTopbar user={user} calendarMonth={calendarMonth} isCalendarView={activeView === "payments"} initials={initials} onMenuOpen={() => setIsMenuOpen(true)} onCalendarOpen={() => changeView("payments")} onDashboard={() => changeView("dashboard")} onProfileOpen={() => setIsProfileOpen(true)} />{pageContent}{isProfileOpen && <ProfileModal user={user} displayName={displayName} initials={initials} signOutError={signOutError} isSigningOut={isSigningOut} onClose={() => setIsProfileOpen(false)} onSignOut={onSignOut ? () => void handleSignOut() : undefined} />}{isMovementModalOpen && <MovementModal onClose={() => setIsMovementModalOpen(false)} onSubmit={(movement) => { void saveMovement(movement); setBillPaidState((current) => ({ ...current, [movementBillKey(movement.id)]: false })); setIsMovementModalOpen(false); }} />}</section></main>;
+  return (
+    <main className="app-shell">
+      <AppNavigation isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} activeView={activeView} onNavigate={changeView} />
+      <section className="content">
+        <AppTopbar user={user} calendarMonth={calendarMonth} isCalendarView={activeView === "payments"} initials={initials} onMenuOpen={() => setIsMenuOpen(true)} onCalendarOpen={() => changeView("payments")} onDashboard={() => changeView("dashboard")} onProfileOpen={() => setIsProfileOpen(true)} />
+        {pageContent}
+        {isProfileOpen && <ProfileModal user={user} displayName={displayName} initials={initials} signOutError={signOutError} isSigningOut={isSigningOut} onClose={() => setIsProfileOpen(false)} onSignOut={onSignOut ? () => void handleSignOut() : undefined} />}
+        {isMovementModalOpen && <MovementModal
+          onClose={() => { setIsMovementModalOpen(false); setIncomeConflict(null); setMovementSaveError(""); }}
+          onSubmit={submitMovement}
+          submissionError={movementSaveError}
+        />}
+        {incomeConflict && <IncomeConflictDialog
+          conflict={incomeConflict}
+          selectedKey={selectedPlannedIncomeKey}
+          error={incomeConflictError}
+          onSelect={setSelectedPlannedIncomeKey}
+          onReplace={() => finishIncomeConflict(true)}
+          onAddExtra={() => finishIncomeConflict(false)}
+          onCancel={() => { setIncomeConflict(null); setIncomeConflictError(""); }}
+        />}
+      </section>
+    </main>
+  );
 }

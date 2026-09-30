@@ -12,10 +12,9 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { financePeriods, type SeedPayPeriod } from "../data/financeSeed";
 import { FloatingActionButton } from "../components/FloatingActionButton";
 import { MovementModal } from "../components/MovementModal";
-import { cgiPaymentDate, cgiPaymentLabel, currency, dateKey, dueDate, monthLabels } from "../lib/finance";
+import { calculateFinanceLedger, cgiPaymentDate, cgiPaymentLabel, currency, dateKey, monthLabels, resolveFinancialEntries, splitOwnerAmount } from "../lib/finance";
 import type { Bill, Goal, Movement } from "../types/finance";
 
 type Person = "Leandro" | "Ketlin";
@@ -47,7 +46,6 @@ type PaymentBalance = {
 type MonthSummary = {
   key: string;
   label: string;
-  periods: SeedPayPeriod[];
   incomeTotal: number;
   expenseTotal: number;
   savingsTotal: number;
@@ -101,28 +99,9 @@ function belongsTo(owner: Bill["owner"], person: Person) {
   );
 }
 
-function allocatedAmount(amount: number, owner: Bill["owner"]) {
-  return owner === "Compartilhado" ? amount / 2 : amount;
-}
-
-function billPeriodKey(periodDate: string, billId: string) {
-  return `period:${periodDate}:${billId}`;
-}
-
-function billMovementKey(movementId: string) {
-  return `movement:${movementId}`;
-}
-
-function movementBill(movement: Movement, paid: boolean): Bill {
-  return {
-    id: movement.id,
-    name: movement.description,
-    owner: movement.owner,
-    amount: movement.amount,
-    due: movement.date,
-    category: movement.category,
-    paid,
-  };
+function allocatedAmount(amount: number, owner: Bill["owner"], person: Person) {
+  const financeOwner = person === "Leandro" ? "Você" : "Esposa";
+  return splitOwnerAmount(amount, owner)[financeOwner];
 }
 
 function entryOverridesStorageKey(storageKey: string) {
@@ -386,7 +365,7 @@ function MonthDetailsModal({
                                   }
                                 >
                                   {currency.format(
-                                    allocatedAmount(bill.amount, bill.owner),
+                                    allocatedAmount(bill.amount, bill.owner, person),
                                   )}
                                 </strong>
                               </div>
@@ -571,88 +550,41 @@ export function DashboardPage({
     });
   };
 
+  const financialEntries = useMemo(
+    () => resolveFinancialEntries(movements, entryOverrides),
+    [movements, entryOverrides],
+  );
+  const contributions = useMemo(() => goals.flatMap((goal) => goal.contributions), [goals]);
+  const ledger = useMemo(() => calculateFinanceLedger(financialEntries, contributions), [financialEntries, contributions]);
+
   const months = useMemo(() => {
     return Array.from({ length: 12 }, (_, monthIndex) => {
       const date = new Date(currentYear, monthIndex, 1);
       const key = `${date.getFullYear()}-${String(monthIndex + 1).padStart(2, "0")}`;
-      const periods = financePeriods.filter((period) =>
-        period.date.startsWith(key),
-      );
-      const resolvedMovements = movements.map((movement) => ({
-        ...movement,
-        ...entryOverrides[`movement:${movement.id}`],
-      }));
-      const monthMovements = resolvedMovements.filter((movement) =>
-        movement.date.startsWith(key),
-      );
-      const incomeMovements = monthMovements.filter(
-        (movement) => movement.type === "income",
-      );
-      const expenseMovements = monthMovements.filter(
-        (movement) => movement.type === "expense",
-      );
+      const monthEntries = financialEntries.filter((entry) => entry.date.startsWith(key));
+      const incomeEntries = monthEntries.filter((entry) => entry.type === "income");
 
       const incomeEntriesByPerson: Record<Person, IncomeEntry[]> = {
         Leandro: [],
         Ketlin: [],
       };
-      for (const period of periods) {
-        const leandroKey = `period-income:${period.date}:leandro`;
-        const ketlinKey = `period-income:${period.date}:ketlin`;
-        const leandroOverride = entryOverrides[leandroKey];
-        const ketlinOverride = entryOverrides[ketlinKey];
-        if (!leandroOverride?.deleted) {
+      for (const entry of incomeEntries) {
+        if (belongsTo(entry.owner, "Leandro")) {
           incomeEntriesByPerson.Leandro.push({
-            id: `${period.date}-leandro`,
-            label: leandroOverride?.description ?? "Receita recebida",
-            date: leandroOverride?.date ?? period.date,
-            amount: leandroOverride?.amount ?? period.income.leandro,
-            movement: {
-              id: leandroKey,
-              type: "income",
-              amount: leandroOverride?.amount ?? period.income.leandro,
-              date: leandroOverride?.date ?? period.date,
-              description: leandroOverride?.description ?? "Receita recebida",
-              category: leandroOverride?.category ?? "Salário",
-              owner: leandroOverride?.owner ?? "Você",
-            },
+            id: entry.id,
+            label: entry.title,
+            date: entry.date,
+            amount: allocatedAmount(entry.amount, entry.owner, "Leandro"),
+            movement: entry.movement,
           });
         }
-        if (!ketlinOverride?.deleted) {
+        if (belongsTo(entry.owner, "Ketlin")) {
           incomeEntriesByPerson.Ketlin.push({
-            id: `${period.date}-ketlin`,
-            label: ketlinOverride?.description ?? "Receita recebida",
-            date: ketlinOverride?.date ?? period.date,
-            amount: ketlinOverride?.amount ?? period.income.ketlin,
-            movement: {
-              id: ketlinKey,
-              type: "income",
-              amount: ketlinOverride?.amount ?? period.income.ketlin,
-              date: ketlinOverride?.date ?? period.date,
-              description: ketlinOverride?.description ?? "Receita recebida",
-              category: ketlinOverride?.category ?? "Salário",
-              owner: ketlinOverride?.owner ?? "Esposa",
-            },
-          });
-        }
-      }
-      for (const movement of incomeMovements) {
-        if (belongsTo(movement.owner, "Leandro")) {
-          incomeEntriesByPerson.Leandro.push({
-            id: movement.id,
-            label: movement.description,
-            date: movement.date,
-            amount: allocatedAmount(movement.amount, movement.owner),
-            movement,
-          });
-        }
-        if (belongsTo(movement.owner, "Ketlin")) {
-          incomeEntriesByPerson.Ketlin.push({
-            id: movement.id,
-            label: movement.description,
-            date: movement.date,
-            amount: allocatedAmount(movement.amount, movement.owner),
-            movement,
+            id: entry.id,
+            label: entry.title,
+            date: entry.date,
+            amount: allocatedAmount(entry.amount, entry.owner, "Ketlin"),
+            movement: entry.movement,
           });
         }
       }
@@ -674,62 +606,36 @@ export function DashboardPage({
         ),
       };
 
-      const billsByPerson = people.map((person) => {
-        const seeded: ExpenseEntry[] = periods.flatMap((period) =>
-          period.bills.flatMap((bill) => {
-            const editKey = `period-expense:${period.date}:${bill.id}`;
-            const override = entryOverrides[editKey];
-            if (override?.deleted) return [];
-            const owner = override?.owner ?? bill.owner;
-            if (!belongsTo(owner, person)) return [];
-            const toggleKey = billPeriodKey(period.date, bill.id);
-            const expenseDate = override?.date
-              ? new Date(`${override.date}T12:00:00`)
-              : dueDate(period.date, bill.due);
+      const billsByPerson = people.map((person) => ({
+        person,
+        bills: monthEntries
+          .filter((entry) => entry.type === "expense" && belongsTo(entry.owner, person))
+          .map((entry) => {
+            const expenseDate = new Date(`${entry.date}T12:00:00`);
             return {
               bill: {
-                ...bill,
-                name: override?.description ?? bill.name,
-                amount: override?.amount ?? bill.amount,
-                category: override?.category ?? bill.category,
-                owner,
-                paid: isBillPaid(toggleKey),
+                id: entry.id,
+                name: entry.title,
+                owner: entry.owner,
+                amount: entry.amount,
+                due: entry.date,
+                category: entry.category,
+                paid: isBillPaid(entry.toggleKey),
               },
               incomeLabel: cgiPaymentLabel(expenseDate),
               expenseDate,
-              toggleKey,
-              editKey,
+              toggleKey: entry.toggleKey,
+              editKey: entry.key,
             };
-          }),
-        );
-
-        const added: ExpenseEntry[] = expenseMovements
-          .filter((movement) => belongsTo(movement.owner, person))
-          .map((movement) => {
-            const toggleKey = billMovementKey(movement.id);
-            return {
-              bill: movementBill(movement, isBillPaid(toggleKey)),
-              incomeLabel: cgiPaymentLabel(new Date(`${movement.date}T12:00:00`)),
-              expenseDate: new Date(`${movement.date}T12:00:00`),
-              toggleKey,
-              editKey: `movement:${movement.id}`,
-            };
-          });
-
-        return {
-          person,
-          bills: [...seeded, ...added].sort(
-            (left, right) =>
-              left.expenseDate.getTime() - right.expenseDate.getTime(),
-          ),
-        };
-      });
+          })
+          .sort((left, right) => left.expenseDate.getTime() - right.expenseDate.getTime()),
+      }));
 
       const expenseByPerson = billsByPerson.reduce<Record<Person, number>>(
         (totals, group) => {
           totals[group.person] = group.bills.reduce(
             (total, item) =>
-              total + allocatedAmount(item.bill.amount, item.bill.owner),
+              total + allocatedAmount(item.bill.amount, item.bill.owner, group.person),
             0,
           );
           return totals;
@@ -742,28 +648,21 @@ export function DashboardPage({
           total +
           group.bills.reduce(
             (sum, item) =>
-              sum + allocatedAmount(item.bill.amount, item.bill.owner),
+              sum + allocatedAmount(item.bill.amount, item.bill.owner, group.person),
             0,
           ),
         0,
       );
       const incomeTotal = incomeByPerson.Leandro + incomeByPerson.Ketlin;
-      const goalContributions = goals.flatMap((goal) =>
-        goal.contributions
-          .filter((contribution) => (contribution.incomeSourceDate ?? contribution.date).startsWith(key))
-          .map((contribution) => ({
-            ...contribution,
-            sourceDate: contribution.incomeSourceDate ?? contribution.date,
-          })),
-      );
-      const savingsTotal = goalContributions.reduce((total, item) => total + item.amount, 0);
+      const allocation = ledger.get(key);
+      const savingsTotal = allocation?.goalContributionsTotal ?? 0;
       const label = monthLabel(date);
       const relatedExpensesByIncome = new Map<string, { amount: number; date: string }>();
-      billsByPerson.forEach(({ bills }) => {
+      billsByPerson.forEach(({ person, bills }) => {
         bills.forEach(({ bill, incomeLabel, expenseDate }) => {
           const current = relatedExpensesByIncome.get(incomeLabel);
           relatedExpensesByIncome.set(incomeLabel, {
-            amount: (current?.amount ?? 0) + allocatedAmount(bill.amount, bill.owner),
+            amount: (current?.amount ?? 0) + allocatedAmount(bill.amount, bill.owner, person),
             date: current?.date ?? dateKey(expenseDate),
           });
         });
@@ -794,7 +693,7 @@ export function DashboardPage({
           });
         });
       });
-      billsByPerson.forEach(({ bills }) => {
+      billsByPerson.forEach(({ person, bills }) => {
         bills.forEach(({ bill, incomeLabel, expenseDate }) => {
           const current = paymentBalancesByLabel.get(incomeLabel);
           const normalizedPaymentDate = cgiPaymentDate(expenseDate);
@@ -802,22 +701,28 @@ export function DashboardPage({
             income: current?.income ?? 0,
             expense:
               (current?.expense ?? 0) +
-              allocatedAmount(bill.amount, bill.owner),
+              allocatedAmount(bill.amount, bill.owner, person),
             savings: current?.savings ?? 0,
             date: current?.date ?? dateKey(normalizedPaymentDate),
           });
         });
       });
-      goalContributions.forEach((contribution) => {
-        const sourceDate = new Date(`${contribution.sourceDate}T12:00:00`);
-        const paymentDate = cgiPaymentDate(sourceDate);
-        const paymentLabel = cgiPaymentLabel(paymentDate);
+      const savingsByPayment = contributions
+        .filter((contribution) => (contribution.incomeSourceDate ?? contribution.date).startsWith(key))
+        .reduce((totals, contribution) => {
+          const paymentDate = cgiPaymentDate(contribution.incomeSourceDate ?? contribution.date);
+          const label = cgiPaymentLabel(paymentDate);
+          const current = totals.get(label);
+          totals.set(label, { amount: (current?.amount ?? 0) + contribution.amount, date: current?.date ?? dateKey(paymentDate) });
+          return totals;
+        }, new Map<string, { amount: number; date: string }>());
+      savingsByPayment.forEach(({ amount, date }, paymentLabel) => {
         const current = paymentBalancesByLabel.get(paymentLabel);
         paymentBalancesByLabel.set(paymentLabel, {
           income: current?.income ?? 0,
           expense: current?.expense ?? 0,
-          savings: (current?.savings ?? 0) + contribution.amount,
-          date: current?.date ?? dateKey(paymentDate),
+          savings: amount,
+          date: current?.date ?? date,
         });
       });
       const paymentBalances: PaymentBalance[] = [...paymentBalancesByLabel.entries()]
@@ -835,11 +740,10 @@ export function DashboardPage({
       return {
         key,
         label,
-        periods,
         incomeTotal,
         expenseTotal,
         savingsTotal,
-        balance: incomeTotal - expenseTotal - savingsTotal,
+        balance: allocation?.balance ?? incomeTotal - expenseTotal - savingsTotal,
         incomeByPerson,
         expenseByPerson,
         incomeEntriesByPerson,
@@ -848,7 +752,7 @@ export function DashboardPage({
         paymentBalances,
       };
     });
-  }, [currentYear, movements, goals, isBillPaid, entryOverrides]);
+  }, [contributions, currentYear, financialEntries, isBillPaid, ledger]);
 
   const selectedMonth =
     months.find((month) => month.key === selectedMonthKey) ?? null;
@@ -881,7 +785,7 @@ export function DashboardPage({
       incomeTotal,
       expenseTotal,
       savingsTotal,
-      balance: incomeTotal - expenseTotal - savingsTotal,
+      balance: months.reduce((total, month) => total + month.balance, 0),
       incomeByPerson,
       expenseByPerson,
       activeMonths: months.filter(
@@ -1112,12 +1016,6 @@ export function DashboardPage({
             }
             const resolvedMovementId = movementId.startsWith("movement:") ? movementId.replace("movement:", "") : movementId;
             onDeleteMovement(resolvedMovementId);
-            updateEntryOverrides((current) => {
-              const next = { ...current };
-              delete next[movementId];
-              delete next[`movement:${resolvedMovementId}`];
-              return next;
-            });
             setEditingMovement(null);
           } : undefined}
           onSubmit={(movement) => {
@@ -1128,6 +1026,8 @@ export function DashboardPage({
             const persistedMovement = { ...movement, id: resolvedMovementId };
             if (movements.some((entry) => entry.id === resolvedMovementId)) {
               onSaveMovement(persistedMovement);
+              setEditingMovement(null);
+              return;
             }
             updateEntryOverrides((current) => {
               const next = { ...current, [overrideKey]: { ...persistedMovement, deleted: false } };

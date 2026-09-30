@@ -15,10 +15,9 @@ npm run dev
 2. Ative Authentication > Sign-in method > Google.
 3. Crie o Firestore Database em modo de produção.
 4. Cadastre um app Web e copie a configuração para `.env.local` usando `.env.example`.
-5. Adicione os domínios `localhost` e o domínio da Vercel em Authentication > Settings > Authorized domains.
-6. Substitua os dois placeholders de e-mail em `firestore.rules`.
-7. Substitua `YOUR_PROJECT_ID` pelo ID do projeto em `.firebaserc`.
-8. Instale o Firebase CLI e publique as regras:
+5. Configure `VITE_ALLOWED_EMAILS` com os e-mails autorizados para acesso direto, separados por vírgula. Membros convidados usam o aceite do convite.
+6. Adicione os domínios `localhost` e o domínio da Vercel em Authentication > Settings > Authorized domains.
+7. Instale o Firebase CLI, selecione o projeto e publique as regras:
 
 ```bash
 npm install -g firebase-tools
@@ -43,7 +42,10 @@ O `vercel.json` mantém o fallback das rotas SPA para `index.html`.
 ## Validação
 
 ```bash
+npm test
 npm run typecheck
 npm run lint
 npm run build
 ```
+
+Os valores são apresentados em dólares canadenses (CAD). O saldo disponível cobre contas futuras por data de vencimento antes de liberar aportes para objetivos.
