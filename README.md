@@ -2,12 +2,20 @@
 
 App web para planejamento financeiro doméstico por pagamento quinzenal.
 
+Receitas previstas e recebidas, contas recorrentes com histórico de pagamento, objetivos com aportes e orçamento compartilhado por convite. Moeda: CAD.
+
+- [Regras do saldo, exemplos e limites](docs/balance-rules.md)
+- [Batch 4: decisões de backup/exportação, offline e validação](docs/readiness.md)
+- [Histórico de decisões do produto](docs/product-decisions.md)
+
 ## Local
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
+
+Use uma versão de Node compatível com o Vite instalado (Node 22.12+). Sem as variáveis Firebase, o app funciona em modo local no navegador. Para usar autenticação e dados compartilhados, copie `.env.example` para `.env.local` e preencha os valores. Não versione arquivos de credenciais ou cópias financeiras.
 
 ## Firebase
 
@@ -49,9 +57,15 @@ O `vercel.json` mantém o fallback das rotas SPA para `index.html`.
 
 ```bash
 npm test
+npm run test:flows
+npm run test:rules
 npm run typecheck
 npm run lint
 npm run build
 ```
 
-Os valores são apresentados em dólares canadenses (CAD). O saldo disponível cobre contas futuras por data de vencimento antes de liberar aportes para objetivos.
+`test:flows` executa os fluxos de domínio. `test:rules` requer Firebase CLI e Java instalados e inicia um emulador isolado no projeto `demo-financevault`; inclui os fluxos de persistência e convites. Sem emulador, `npm test` ignora a suíte Firestore. Os testes não enviam convites reais nem acessam dados de produção.
+
+O saldo do mês soma os cartões de pagamento e pode incluir previsões. O disponível para objetivos considera recebimentos e reserva contas futuras antes de liberar aportes. Veja as [regras detalhadas](docs/balance-rules.md).
+
+A PWA e o cache local não garantem edição offline nem recuperação de dados. Exportação/restauração e backup automático ainda não estão implementados/configurados; a estratégia e os limites estão em [Prontidão](docs/readiness.md).

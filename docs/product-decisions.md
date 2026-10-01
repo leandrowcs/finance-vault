@@ -36,7 +36,11 @@
 - Any unused goal balance may return to the current month's available balance.
 - Spending above the goal balance may use current-month available funds; it must not create income or hide the overage.
 
-## Follow-up Batches
+## Batch 4 — Prontidão (2026-10-01)
+
+O escopo atual de prontidão e as decisões de backup/exportação e offline estão em [readiness.md](readiness.md). As regras implementadas e diferenças entre indicadores estão em [balance-rules.md](balance-rules.md). A lista abaixo é o planejamento histórico, não uma declaração de conclusão. Em particular, gasto e devolução de saldo de objetivos ainda não estão implementados.
+
+## Follow-up Batches (historical roadmap)
 
 1. Unify income allocation and monthly balance calculations; add focused financial tests.
 2. Planning data: implemented with Firestore-backed periods, recurring bill templates, actual receipt events, bill occurrences, overdue status, and payment history. Seed migration is versioned and deterministic; recurring occurrences are generated 12 months forward.

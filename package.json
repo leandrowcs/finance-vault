@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test": "vitest run",
+    "test:flows": "vitest run src/lib/finance.flows.test.ts",
     "test:rules": "firebase emulators:exec --project demo-financevault --only firestore \"vitest run src/lib/firestore.rules.test.ts\"",
     "lint": "oxlint",
     "preview": "vite preview",

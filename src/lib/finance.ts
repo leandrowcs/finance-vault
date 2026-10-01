@@ -77,7 +77,7 @@ export function resolveFinancialEntries(
     ] as const).flatMap(({ person, owner, amount }) => {
       const key = `period-income:${period.date}:${person}`;
       const override = overrides[key];
-      if (override?.deleted) return [];
+      if (override?.deleted && !override.replacedByMovementId) return [];
       const receipts = period.receivedIncome?.[person] ?? [];
       const plannedAmount = override?.amount ?? amount;
       const title = override?.description ?? "Pagamento planejado";
@@ -113,7 +113,7 @@ export function resolveFinancialEntries(
         }];
       });
       const remainingAmount = Math.max(0, plannedAmount - receipts.reduce((total, receipt) => total + receipt.actualAmount, 0));
-      const plannedEntry: FinancialEntry[] = remainingAmount > 0 ? [{
+      const plannedEntry: FinancialEntry[] = !override?.deleted && remainingAmount > 0 ? [{
         id: key,
         key,
         type: "income",

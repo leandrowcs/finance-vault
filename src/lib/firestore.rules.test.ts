@@ -13,7 +13,7 @@ import {
   updateDoc,
   writeBatch,
 } from "firebase/firestore";
-import { afterAll, beforeAll, beforeEach, describe, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 const firestoreEmulator = process.env.FIRESTORE_EMULATOR_HOST;
 const rulesDescribe = firestoreEmulator ? describe : describe.skip;
@@ -147,5 +147,96 @@ rulesDescribe("Firestore household access rules", () => {
     await assertSucceeds(batch.commit());
     const memberFirestore = environment.authenticatedContext("member", { email: "member@example.com" }).firestore();
     await assertFails(getDoc(doc(memberFirestore, "users", "owner", "movements", "sample")));
+  });
+
+  it("creates, accepts, downgrades and revokes an invitation without changing personal data", async () => {
+    const owner = environment.authenticatedContext("owner", { email: "owner@example.com" }).firestore();
+    const member = environment.authenticatedContext("new-member", { email: "new@example.com" }).firestore();
+    const stranger = environment.authenticatedContext("stranger", { email: "stranger@example.com" }).firestore();
+    const inviteRef = doc(owner, "households", "owner", "invites", "flow-invite");
+    const personalRef = doc(member, "users", "new-member", "movements", "personal");
+    expect((await getDoc(inviteRef)).exists()).toBe(false);
+    expect((await getDoc(personalRef)).exists()).toBe(false);
+    await setDoc(personalRef, { amount: 75, description: "Personal record" });
+    await setDoc(doc(owner, "users", "owner", "movements", "shared"), { amount: 100 });
+    await assertFails(getDoc(doc(member, "users", "owner", "movements", "shared")));
+
+    await assertSucceeds(setDoc(inviteRef, {
+      email: "new@example.com", accessLevel: "edit", delivery: "manual",
+      status: "pending", createdBy: "owner", expiresAt: new Date(Date.now() + 86400000),
+    }));
+    await assertFails(updateDoc(doc(stranger, inviteRef.path), {
+      status: "accepted", acceptedBy: "stranger", acceptedAt: new Date(),
+    }));
+    expect((await getDoc(inviteRef)).data()?.status).toBe("pending");
+
+    const memberRef = doc(member, "households", "owner", "members", "new-member");
+    const membershipRef = doc(member, "users", "new-member", "memberships", "owner");
+    const acceptance = writeBatch(member);
+    acceptance.update(doc(member, inviteRef.path), {
+      status: "accepted", acceptedBy: "new-member", acceptedAt: new Date(),
+    });
+    acceptance.set(memberRef, {
+      uid: "new-member", email: "new@example.com", displayName: "New member",
+      accessLevel: "edit", inviteId: "flow-invite",
+    });
+    acceptance.set(membershipRef, { ownerUid: "owner", accessLevel: "edit" });
+    await assertSucceeds(acceptance.commit());
+    expect((await getDoc(inviteRef)).data()?.acceptedBy).toBe("new-member");
+    expect((await getDoc(memberRef)).data()?.accessLevel).toBe("edit");
+    expect((await getDoc(membershipRef)).data()?.accessLevel).toBe("edit");
+    expect((await getDoc(personalRef)).data()?.amount).toBe(75);
+    expect((await getDoc(doc(owner, "users", "owner", "movements", "personal"))).exists()).toBe(false);
+    await assertSucceeds(updateDoc(doc(member, "users", "owner", "movements", "shared"), { amount: 120 }));
+
+    const downgrade = writeBatch(owner);
+    downgrade.update(doc(owner, memberRef.path), { accessLevel: "read" });
+    downgrade.update(doc(owner, membershipRef.path), { accessLevel: "read" });
+    await assertSucceeds(downgrade.commit());
+    expect((await getDoc(membershipRef)).data()?.accessLevel).toBe("read");
+    expect((await getDoc(doc(member, "users", "owner", "movements", "shared"))).data()?.amount).toBe(120);
+    await assertFails(updateDoc(doc(member, "users", "owner", "movements", "shared"), { amount: 999 }));
+
+    const removal = writeBatch(owner);
+    removal.delete(doc(owner, memberRef.path));
+    removal.delete(doc(owner, membershipRef.path));
+    await assertSucceeds(removal.commit());
+    expect((await getDoc(membershipRef)).exists()).toBe(false);
+    await assertFails(getDoc(doc(member, "users", "owner", "movements", "shared")));
+    expect((await getDoc(personalRef)).data()?.amount).toBe(75);
+  });
+
+  it("persists goal contributions and their allocation atomically and releases them on deletion", async () => {
+    await seedMember("edit");
+    const editor = environment.authenticatedContext("member", { email: "member@example.com" }).firestore();
+    const owner = environment.authenticatedContext("owner", { email: "owner@example.com" }).firestore();
+    const goalRef = doc(editor, "users", "owner", "goals", "trip");
+    const settingsRef = doc(editor, "users", "owner", "settings", "shared-state");
+    expect((await getDoc(goalRef)).exists()).toBe(false);
+    expect((await getDoc(settingsRef)).exists()).toBe(false);
+    await assertSucceeds(setDoc(goalRef, { id: "trip", name: "Trip", target: 200, saved: 0, contributions: [] }));
+    expect((await getDoc(goalRef)).data()?.saved).toBe(0);
+
+    const contribution = { id: "transfer", amount: 50, date: "2026-10-01", incomeSourceId: "salary" };
+    const transfer = writeBatch(editor);
+    transfer.update(goalRef, { saved: 50, contributions: [contribution] });
+    transfer.set(settingsRef, { incomeAllocations: { salary: 50 } });
+    await assertSucceeds(transfer.commit());
+    expect((await getDoc(goalRef)).data()?.contributions).toEqual([contribution]);
+    expect((await getDoc(settingsRef)).data()?.incomeAllocations.salary).toBe(50);
+
+    const forbiddenRemoval = writeBatch(editor);
+    forbiddenRemoval.set(settingsRef, { incomeAllocations: { salary: 0 } });
+    forbiddenRemoval.delete(goalRef);
+    await assertFails(forbiddenRemoval.commit());
+    expect((await getDoc(goalRef)).data()?.saved).toBe(50);
+    expect((await getDoc(settingsRef)).data()?.incomeAllocations.salary).toBe(50);
+
+    const removal = writeBatch(owner);
+    removal.set(doc(owner, settingsRef.path), { incomeAllocations: { salary: 0 } });
+    removal.delete(doc(owner, goalRef.path));
+    await assertSucceeds(removal.commit());
+    expect((await getDoc(goalRef)).exists()).toBe(false);
+    expect((await getDoc(settingsRef)).data()?.incomeAllocations.salary).toBe(0);
   });
 });
