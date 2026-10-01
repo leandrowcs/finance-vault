@@ -237,14 +237,16 @@ function expandRecurringMovement(movement: Movement) {
   const recurrence = movement.recurrence ?? "none";
   const count = recurrence === "none" ? 1 : Math.min(120, Math.max(1, movement.recurrenceCount ?? 1));
   const recurrenceId = movement.recurrenceId ?? movement.id;
+  const movementData = { ...movement };
+  delete movementData.recurrenceId;
+  delete movementData.recurrenceIndex;
   return Array.from({ length: count }, (_, index) => ({
-    ...movement,
+    ...movementData,
     id: index === 0 ? movement.id : `${recurrenceId}:${index}`,
     date: recurrence === "none" ? movement.date : addRecurrenceDate(movement.date, recurrence, index),
     recurrence,
     recurrenceCount: count,
-    recurrenceId: recurrence === "none" ? undefined : recurrenceId,
-    recurrenceIndex: recurrence === "none" ? undefined : index,
+    ...(recurrence === "none" ? {} : { recurrenceId, recurrenceIndex: index }),
   }));
 }
 
@@ -678,14 +680,14 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     });
     const normalizedOverrides = normalizeEntryOverrides(nextEntryOverrides);
     if (dataUser && db) {
-      const batch = writeBatch(db);
-      savedMovements.forEach((savedMovement) => {
-        batch.set(doc(db!, "users", dataUser.uid, "movements", savedMovement.id), savedMovement);
-      });
-      if (replacedPlannedIncomeKeys.length > 0) {
-        batch.set(sharedStateRef(dataUser), { entryOverrides: normalizedOverrides }, { merge: true });
-      }
       try {
+        const batch = writeBatch(db);
+        savedMovements.forEach((savedMovement) => {
+          batch.set(doc(db!, "users", dataUser.uid, "movements", savedMovement.id), savedMovement);
+        });
+        if (replacedPlannedIncomeKeys.length > 0) {
+          batch.set(sharedStateRef(dataUser), { entryOverrides: normalizedOverrides }, { merge: true });
+        }
         await batch.commit();
       } catch {
         return false;
