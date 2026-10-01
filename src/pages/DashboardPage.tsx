@@ -267,24 +267,28 @@ function MonthDetailsModal({
             aria-labelledby="expenses-title"
           >
             <div className="section-heading month-details-section-heading">
-            <button
-              className="section-collapse-trigger month-details-collapse-trigger"
-              type="button"
-              aria-expanded={expandedSections.expenses}
-              onClick={() =>
-                setExpandedSections((current) => ({
-                  ...current,
-                  expenses: !current.expenses,
-                }))
-              }
-            >
-              <h2 id="expenses-title">Despesas do mês</h2>
-              {expandedSections.expenses ? (
-                <ChevronUp size={16} />
-              ) : (
-                <ChevronDown size={16} />
-              )}
-            </button>
+              <button
+                className="section-collapse-trigger month-details-collapse-trigger"
+                type="button"
+                aria-expanded={expandedSections.expenses}
+                onClick={() =>
+                  setExpandedSections((current) => ({
+                    ...current,
+                    expenses: !current.expenses,
+                  }))
+                }
+              >
+                <h2 id="expenses-title">Despesas do mês</h2>
+                {expandedSections.expenses ? (
+                  <ChevronUp size={16} />
+                ) : (
+                  <ChevronDown size={16} />
+                )}
+              </button>
+              <span className="section-caption month-details-section-caption">
+                {new Set(month.billsByPerson.flatMap((group) => group.bills.map((entry) => entry.editKey))).size}{" "}
+                despesas
+              </span>
             </div>
             <div className="month-details-expense-summary">
             <article className="month-details-total-card month-details-expense-total-card">
