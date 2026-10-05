@@ -12,11 +12,11 @@ Todos os valores são em CAD. Despesas compartilhadas são divididas entre Você
 - Ao adicionar receita manual com a mesma data e valor em centavos de uma previsão pendente, o usuário escolhe substituir ou adicionar. A comparação atual não filtra pelo responsável: se houver várias correspondências, é necessário escolher a previsão.
 - Substituir oculta a previsão pendente vinculada, preservando recebimentos parciais anteriores; adicionar mantém ambas. Excluir a receita substituta restaura a previsão vinculada.
 
-## Saldo do mês no dashboard
+## Saldo projetado no dashboard
 
 Cada cartão de pagamento calcula `receitas − despesas associadas − aportes`. O saldo do mês soma esses cartões, arredondando cada saldo a centavos. Os agrupamentos usam o calendário de pagamentos de 14 dias ancorado em 03/09/2026.
 
-Esse é um resumo de planejamento: pode incluir receitas ainda previstas. Não é saldo bancário nem autorização para gastar/aportar. Exemplo: cartões de −530,08 e 853,93 resultam em **323,85 CAD**.
+A interface usa o nome **Saldo projetado**, mostra o recebido até hoje e o que ainda falta receber, e explica separadamente a disponibilidade para objetivos. A receita manual com data futura permanece em “a receber” até essa data. Esse é um resumo de planejamento: pode incluir receitas ainda previstas. Não é saldo bancário nem autorização para gastar/aportar. Exemplo: cartões de −530,08 e 853,93 resultam em **323,85 CAD**.
 
 ## Disponível para objetivos
 

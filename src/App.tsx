@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { sendSignInLinkToEmail, type User } from "firebase/auth";
-import { arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, increment, onSnapshot, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, writeBatch } from "firebase/firestore";
+import { arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, increment, onSnapshot, runTransaction, serverTimestamp, setDoc, Timestamp, writeBatch } from "firebase/firestore";
 import { financePeriods } from "./data/financeSeed";
 import { AppNavigation, type NavigationView } from "./components/AppNavigation";
 import { AppTopbar } from "./components/AppTopbar";
@@ -11,12 +11,22 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { BillsPage, GoalsPage, IncomePage, MembersPage, SettingsPage } from "./pages/PlanningPages";
 import { buildSeedPlanningMigration, dateKey, findPlannedIncomeMatches, generateBillOccurrences, nextPaymentFromPeriods, resolveFinancialEntries, toggleBillOccurrencePayment, type FinancialEntry, type FinanceOverrides } from "./lib/finance";
 import { auth, db } from "./lib/firebase";
+import { allocationTotals, emptyFinanceData, parseBackup, previewRestore, type FinanceBackup, type FinanceData } from "./lib/backup";
+import { readFinanceData, restoreFinanceData } from "./lib/backupFirestore";
+import { useFinanceSync } from "./lib/useFinanceSync";
+import { syncLabels } from "./lib/sync";
+import { localBackupKey, persistLocalFinance } from "./lib/localFinance";
+import { LocalDataRecovery } from "./components/LocalDataRecovery";
 import type { BillOccurrence, BillTemplate, CalendarItem, EditablePayPeriod, Goal, GoalContribution, GoalIncomeSource, HouseholdInvite, HouseholdMember, IncomeRecipient, InviteDeliveryMode, MemberAccessLevel, Movement, ReceivedPayment } from "./types/finance";
 import "./App.css";
 
 type AppProps = { user?: User | null; onSignOut?: () => Promise<void> };
 type EntryOverrides = FinanceOverrides;
 type DataUser = Pick<User, "uid"> | null;
+function readLocalBackup() {
+  const stored = localStorage.getItem(localBackupKey);
+  return stored ? parseBackup(stored) : null;
+}
 
 type IncomeConflict = { movement: Movement; matches: FinancialEntry[] };
 
@@ -77,20 +87,12 @@ function periodBillKey(periodDate: string, billId: string) {
   return `period:${periodDate}:${billId}`;
 }
 
-function movementBillKey(movementId: string) {
-  return `movement:${movementId}`;
-}
-
 function movementsStorageKey(user: DataUser) {
   return user ? `financevault:movements:${user.uid}` : "financevault:movements";
 }
 
 function billsStorageKey(user: DataUser) {
   return user ? `financevault:bills:${user.uid}` : "financevault:bills";
-}
-
-function deletedMovementsStorageKey(user: DataUser) {
-  return user ? `financevault:deleted-movements:${user.uid}` : "financevault:deleted-movements";
 }
 
 function entryOverridesStorageKey(user: DataUser) {
@@ -201,15 +203,6 @@ function readStoredBillState(user: DataUser) {
   }
 }
 
-function readDeletedMovementIds(user: DataUser) {
-  try {
-    const stored = localStorage.getItem(deletedMovementsStorageKey(user));
-    return stored ? new Set(JSON.parse(stored) as string[]) : new Set<string>();
-  } catch {
-    return new Set<string>();
-  }
-}
-
 function readStoredEntryOverrides(user: DataUser) {
   try {
     const stored = localStorage.getItem(entryOverridesStorageKey(user));
@@ -251,7 +244,13 @@ function expandRecurringMovement(movement: Movement) {
 }
 
 export default function App({ user = null, onSignOut }: AppProps = {}) {
-  const [initialPlanning] = useState(() => buildSeedPlanningMigration(financePeriods, readStoredBillState(user)));
+  const [localLoad] = useState(() => {
+    try { return { backup: !user && !db ? readLocalBackup() : null, error: "" }; }
+    catch { return { backup: null, error: "Não foi possível ler os dados locais. O conteúdo original foi preservado." }; }
+  });
+  const localBackup = localLoad.backup;
+  const [localHasData, setLocalHasData] = useState(() => Boolean(localBackup) || readStoredMovements(null).length > 0 || readStoredGoals("local").length > 0 || Object.keys(readStoredBillState(null)).length > 0 || Object.keys(readStoredEntryOverrides(null)).length > 0);
+  const [initialPlanning] = useState(() => localBackup ? { periods: localBackup.data.periods, bills: localBackup.data.bills, occurrences: localBackup.data.occurrences } : buildSeedPlanningMigration(financePeriods, readStoredBillState(user)));
   const [billPaidState, setBillPaidState] = useState<Record<string, boolean>>(() => ({ ...Object.fromEntries(financePeriods.flatMap((period) => period.bills.map((bill) => [periodBillKey(period.date, bill.id), bill.paid]))), ...readStoredBillState(user) }));
   const [entryOverrides, setEntryOverrides] = useState<EntryOverrides | undefined>();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -283,8 +282,44 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
   const [householdInvites, setHouseholdInvites] = useState<HouseholdInvite[]>([]);
   const dataUser: DataUser = dataOwnerUid ? { uid: dataOwnerUid } : null;
-  const canEditData = accessLevel !== "read";
-  const canDeleteData = accessLevel === "delete" || accessLevel === "owner";
+  const sync = useFinanceSync(dataOwnerUid, householdLoaded);
+  const [operationError, setOperationError] = useState("");
+  const mutationsAllowed = !localLoad.error && !sync.pending && ((!dataOwnerUid || !db) || (sync.online && sync.status === "synced" && !planningError && !householdError));
+  const canEditData = accessLevel !== "read" && mutationsAllowed;
+  const canDeleteData = (accessLevel === "delete" || accessLevel === "owner") && mutationsAllowed;
+  const syncError = localLoad.error || operationError || sync.error || planningError || goalsSyncError || householdError;
+  const syncStatus = sync.status === "offline" ? "offline" as const : syncError ? "error" as const : sync.status;
+  const reportOperation = async <T,>(operation: () => Promise<T>): Promise<T> => {
+    setOperationError("");
+    try { return await sync.run(operation); }
+    catch (error) { setOperationError(error instanceof Error ? error.message : "Não foi possível salvar a alteração."); throw error; }
+  };
+  const financialData: FinanceData = { movements, goals, periods: planningPeriods, bills: billTemplates, occurrences: billOccurrences, settings: { billPaidState, entryOverrides: entryOverrides ?? {}, incomeAllocations: allocationTotals(goals) } };
+  const commitLocalData = (patch: Partial<FinanceData>) => {
+    const data = { ...financialData, ...patch };
+    data.settings = { ...data.settings, incomeAllocations: allocationTotals(data.goals) };
+    persistLocalFinance(localStorage, data);
+    setLocalHasData(true);
+    setMovements(data.movements); setGoals(data.goals); setPlanningPeriods(data.periods);
+    setBillTemplates(data.bills); setBillOccurrences(data.occurrences);
+    setBillPaidState(data.settings.billPaidState); setEntryOverrides(data.settings.entryOverrides);
+  };
+  const readBackupData = async () => {
+    if (dataOwnerUid && db) {
+      if (syncStatus !== "synced") throw new Error("Aguarde a confirmação dos dados no servidor.");
+      return readFinanceData(db, dataOwnerUid);
+    }
+    return financialData;
+  };
+  const restoreBackup = async (backup: FinanceBackup) => {
+    if (accessLevel !== "owner" || !mutationsAllowed) throw new Error("Restauração indisponível para esta sessão.");
+    await reportOperation(async () => {
+      if (dataOwnerUid && db) { await restoreFinanceData(db, dataOwnerUid, backup); return; }
+      const preview = previewRestore(localHasData ? financialData : emptyFinanceData(), backup);
+      if (preview.conflicts.length) throw new Error("Há conflitos. Nenhum dado foi alterado.");
+      commitLocalData(preview.data);
+    });
+  };
   const changeView = (view: NavigationView) => {
     setActiveView(view);
     if (typeof window !== "undefined") window.history.replaceState(null, "", `#${view}`);
@@ -421,7 +456,7 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     };
   }, [accessLevel, dataOwnerUid, householdLoaded, user]);
   useEffect(() => {
-    if (!db || !dataOwnerUid || !canEditData || billTemplates.length === 0) return;
+    if (!db || !dataOwnerUid || !canEditData || !planningLoaded || billTemplates.length === 0) return;
     const horizonEnd = new Date(`${dateKey(new Date())}T12:00:00`);
     horizonEnd.setFullYear(horizonEnd.getFullYear() + 1);
     const today = dateKey(new Date());
@@ -443,7 +478,7 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       if (active) setPlanningError("Não foi possível gerar os próximos vencimentos recorrentes.");
     });
     return () => { active = false; };
-  }, [billOccurrences, billTemplates, canEditData, dataOwnerUid]);
+  }, [billOccurrences, billTemplates, canEditData, dataOwnerUid, planningLoaded]);
   useEffect(() => {
     if (!user || !db || !householdLoaded || !dataOwnerUid || dataOwnerUid === user.uid) return;
     const firestore = db;
@@ -549,60 +584,43 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     if (!householdLoaded) return;
     const activeDataUser: DataUser = dataOwnerUid ? { uid: dataOwnerUid } : null;
     setMovementsLoaded(false);
-    const storedEntryOverrides = readStoredEntryOverrides(activeDataUser);
+    const storedEntryOverrides = !activeDataUser && localBackup ? localBackup.data.settings.entryOverrides : readStoredEntryOverrides(activeDataUser);
     setEntryOverrides(storedEntryOverrides);
-    localStorage.setItem(entryOverridesStorageKey(activeDataUser), JSON.stringify(storedEntryOverrides));
-    const storedMovements = readStoredMovements(activeDataUser);
+    const storedMovements = !activeDataUser && localBackup ? localBackup.data.movements : readStoredMovements(activeDataUser);
     setMovements(storedMovements);
-    setBillPaidState({ ...Object.fromEntries(financePeriods.flatMap((period) => period.bills.map((bill) => [periodBillKey(period.date, bill.id), bill.paid]))), ...readStoredBillState(activeDataUser) });
+    setBillPaidState(!activeDataUser && localBackup ? localBackup.data.settings.billPaidState : { ...Object.fromEntries(financePeriods.flatMap((period) => period.bills.map((bill) => [periodBillKey(period.date, bill.id), bill.paid]))), ...readStoredBillState(activeDataUser) });
     if (activeDataUser && db) {
       const ownerUid = activeDataUser.uid;
       const unsubscribeMovements = onSnapshot(collection(db, "users", ownerUid, "movements"), (snapshot) => {
-        const deletedMovementIds = readDeletedMovementIds(activeDataUser);
-        const remoteMovements = snapshot.docs
-          .map((item) => item.data() as Movement)
-          .filter((movement) => !deletedMovementIds.has(movement.id));
-        const movementsById = new Map(remoteMovements.map((item) => [item.id, item]));
-        const remoteIds = new Set(movementsById.keys());
-        readStoredMovements(activeDataUser)
-          .filter((movement) => !remoteIds.has(movement.id))
-          .forEach((movement) => movementsById.set(movement.id, movement));
-        setMovements([...movementsById.values()]);
+        const remoteMovements = snapshot.docs.map((item) => ({ ...item.data(), id: item.id }) as Movement);
+        setMovements(remoteMovements);
         setMovementsLoaded(true);
-      }, () => setMovementsLoaded(true));
+      }, () => { setMovementsLoaded(true); setOperationError("Não foi possível carregar os lançamentos."); });
       const sharedRef = sharedStateRef(activeDataUser);
       const unsubscribeSharedState = onSnapshot(sharedRef, (snapshot) => {
         const sharedState = snapshot.data() as { billPaidState?: Record<string, boolean>; entryOverrides?: EntryOverrides } | undefined;
         if (sharedState?.billPaidState) {
-          setBillPaidState((current) => ({ ...current, ...sharedState.billPaidState }));
-          localStorage.setItem(billsStorageKey(activeDataUser), JSON.stringify(sharedState.billPaidState));
+          setBillPaidState(sharedState.billPaidState);
         }
         if (sharedState?.entryOverrides !== undefined) {
           const nextEntryOverrides = normalizeEntryOverrides(sharedState.entryOverrides);
           setEntryOverrides(nextEntryOverrides);
-          localStorage.setItem(entryOverridesStorageKey(activeDataUser), JSON.stringify(nextEntryOverrides));
-          if (JSON.stringify(nextEntryOverrides) !== JSON.stringify(sharedState.entryOverrides)) {
-            void updateDoc(sharedRef, { entryOverrides: nextEntryOverrides }).catch(() =>
-              setDoc(sharedRef, { entryOverrides: nextEntryOverrides }, { merge: true }),
-            );
-          }
         } else if (snapshot.exists()) {
           setEntryOverrides({});
-          localStorage.setItem(entryOverridesStorageKey(activeDataUser), JSON.stringify({}));
         }
-      });
+      }, () => setOperationError("Não foi possível carregar os ajustes financeiros."));
       return () => {
         unsubscribeMovements();
         unsubscribeSharedState();
       };
     }
     setMovementsLoaded(true);
-  }, [dataOwnerUid, householdLoaded]);
+  }, [dataOwnerUid, householdLoaded, localBackup]);
   useEffect(() => {
     if (!householdLoaded) return;
     const activeDataUser: DataUser = dataOwnerUid ? { uid: dataOwnerUid } : null;
     const storageKey = dataOwnerUid ?? "local";
-    const localGoals = readStoredGoals(storageKey);
+    const localGoals = !activeDataUser && localBackup ? localBackup.data.goals : readStoredGoals(storageKey);
     setGoals(localGoals);
     setGoalsLoaded(false);
     setGoalsSyncError("");
@@ -610,63 +628,21 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       setGoalsLoaded(true);
       return;
     }
-    let initialSnapshot = true;
-    let active = true;
     const ownerUid = activeDataUser.uid;
     const goalsRef = collection(db, "users", ownerUid, "goals");
     const unsubscribe = onSnapshot(goalsRef, (snapshot) => {
       const remoteGoals = snapshot.docs.map((item) => normalizeGoal(item.id, item.data()));
-      if (initialSnapshot) {
-        initialSnapshot = false;
-        const remoteById = new Map(remoteGoals.map((goal) => [goal.id, goal]));
-        localGoals.forEach((localGoal) => {
-          const remoteGoal = remoteById.get(localGoal.id);
-          const goalRef = doc(db!, "users", ownerUid, "goals", localGoal.id);
-          if (!remoteGoal) {
-            remoteById.set(localGoal.id, localGoal);
-            void setDoc(goalRef, localGoal).catch(() => {
-              if (active) setGoalsSyncError("Sincronização indisponível; objetivos mantidos neste dispositivo.");
-            });
-            return;
-          }
-          const remoteContributionIds = new Set(remoteGoal.contributions.map((item) => item.id));
-          const missingContributions = localGoal.contributions.filter((item) => !remoteContributionIds.has(item.id));
-          if (missingContributions.length > 0) {
-            const mergedContributions = [...remoteGoal.contributions, ...missingContributions];
-            remoteById.set(localGoal.id, {
-              ...remoteGoal,
-              contributions: mergedContributions,
-              saved: mergedContributions.reduce((total, item) => total + item.amount, 0),
-            });
-            void updateDoc(goalRef, {
-              contributions: arrayUnion(...missingContributions),
-              saved: increment(missingContributions.reduce((total, item) => total + item.amount, 0)),
-            }).catch(() => {
-              if (active) setGoalsSyncError("Sincronização indisponível; aportes mantidos neste dispositivo.");
-            });
-          }
-        });
-        const mergedGoals = [...remoteById.values()];
-        setGoals(mergedGoals);
-        localStorage.setItem(goalsStorageKey(storageKey), JSON.stringify(mergedGoals));
-        setGoalsLoaded(true);
-        return;
-      }
       setGoals(remoteGoals);
-      localStorage.setItem(goalsStorageKey(storageKey), JSON.stringify(remoteGoals));
       setGoalsLoaded(true);
     }, () => {
       setGoals(localGoals);
       setGoalsLoaded(true);
       setGoalsSyncError("Sincronização indisponível; objetivos mantidos neste dispositivo.");
     });
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, [dataOwnerUid, householdLoaded]);
+    return unsubscribe;
+  }, [dataOwnerUid, householdLoaded, localBackup]);
   const saveMovement = async (movement: Movement, replacedPlannedIncomeKeys: string[] = []) => {
-    if (!canEditData) return false;
+    if (!canEditData) throw new Error("Alterações indisponíveis.");
     const savedMovements = expandRecurringMovement(movement);
     const savedIds = new Set(savedMovements.map((item) => item.id));
     const nextMovements = [...movements.filter((item) => !savedIds.has(item.id) && item.id !== movement.id), ...savedMovements];
@@ -686,19 +662,14 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
           batch.set(doc(db!, "users", dataUser.uid, "movements", savedMovement.id), savedMovement);
         });
         if (replacedPlannedIncomeKeys.length > 0) {
-          batch.set(sharedStateRef(dataUser), { entryOverrides: normalizedOverrides }, { merge: true });
+          batch.set(sharedStateRef(dataUser), { entryOverrides: normalizedOverrides }, { mergeFields: ["entryOverrides"] });
         }
         await batch.commit();
       } catch {
-        return false;
+        throw new Error("Não foi possível salvar o lançamento.");
       }
     }
-    setMovements(nextMovements);
-    localStorage.setItem(movementsStorageKey(dataUser), JSON.stringify(nextMovements));
-    if (replacedPlannedIncomeKeys.length > 0) {
-      setEntryOverrides(normalizedOverrides);
-      localStorage.setItem(entryOverridesStorageKey(dataUser), JSON.stringify(normalizedOverrides));
-    }
+    if (!dataUser || !db) commitLocalData({ movements: nextMovements, settings: { ...financialData.settings, entryOverrides: normalizedOverrides } });
     return true;
   };
   const submitMovement = (movement: Movement) => {
@@ -713,31 +684,29 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       setIncomeConflictError("");
       return;
     }
-    void saveMovement(movement).then((saved) => {
+    void reportOperation(() => saveMovement(movement)).then((saved) => {
       if (!saved) {
         setMovementSaveError("Não foi possível salvar. Verifique a sincronização e tente novamente.");
         return;
       }
-      setBillPaidState((current) => ({ ...current, [movementBillKey(movement.id)]: false }));
       setIsMovementModalOpen(false);
-    });
+    }).catch(() => setMovementSaveError("Não foi possível salvar. Confira a conexão e tente novamente."));
   };
   const finishIncomeConflict = (replacePlanned: boolean) => {
     if (!incomeConflict) return;
     const replacedKeys = replacePlanned ? [selectedPlannedIncomeKey] : [];
     if (replacePlanned && !selectedPlannedIncomeKey) return;
-    void saveMovement(incomeConflict.movement, replacedKeys).then((saved) => {
+    void reportOperation(() => saveMovement(incomeConflict.movement, replacedKeys)).then((saved) => {
       if (!saved) {
         setIncomeConflictError("Não foi possível salvar. Verifique a sincronização e tente novamente.");
         return;
       }
-      setBillPaidState((current) => ({ ...current, [movementBillKey(incomeConflict.movement.id)]: false }));
       setIncomeConflict(null);
       setIsMovementModalOpen(false);
-    });
+    }).catch(() => setIncomeConflictError("Não foi possível salvar. Confira a conexão e tente novamente."));
   };
   const deleteMovement = async (movementId: string) => {
-    if (!canDeleteData) return;
+    if (!canDeleteData) throw new Error("Exclusão indisponível.");
     const replacedKeys = Object.entries(entryOverrides ?? {})
       .filter(([, override]) => override.replacedByMovementId === movementId)
       .map(([key]) => key);
@@ -751,52 +720,28 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       const batch = writeBatch(db);
       batch.delete(doc(db, "users", dataUser.uid, "movements", movementId));
       if (overridesChanged) {
-        batch.set(sharedStateRef(dataUser), { entryOverrides: normalizedOverrides }, { merge: true });
+        batch.set(sharedStateRef(dataUser), { entryOverrides: normalizedOverrides }, { mergeFields: ["entryOverrides"] });
       }
       try {
         await batch.commit();
       } catch {
-        return;
+        throw new Error("Não foi possível excluir o lançamento.");
       }
     }
-    const deletedMovementIds = readDeletedMovementIds(dataUser);
-    deletedMovementIds.add(movementId);
-    localStorage.setItem(deletedMovementsStorageKey(dataUser), JSON.stringify([...deletedMovementIds]));
-    const nextMovements = movements.filter((movement) => movement.id !== movementId);
-    setMovements(nextMovements);
-    localStorage.setItem(movementsStorageKey(dataUser), JSON.stringify(nextMovements));
-    if (overridesChanged) {
-      setEntryOverrides(normalizedOverrides);
-      localStorage.setItem(entryOverridesStorageKey(dataUser), JSON.stringify(normalizedOverrides));
-    }
+    if (!dataUser || !db) commitLocalData({ movements: movements.filter((movement) => movement.id !== movementId), settings: { ...financialData.settings, entryOverrides: normalizedOverrides } });
   };
   const saveEntryOverrides = async (nextEntryOverrides: EntryOverrides) => {
-    if (!canEditData) return;
+    if (!canEditData) throw new Error("Alterações indisponíveis.");
     const normalizedEntryOverrides = normalizeEntryOverrides(nextEntryOverrides);
-    setEntryOverrides(normalizedEntryOverrides);
-    localStorage.setItem(entryOverridesStorageKey(dataUser), JSON.stringify(normalizedEntryOverrides));
-    if (dataUser && db) {
-      try {
-        await updateDoc(sharedStateRef(dataUser), { entryOverrides: normalizedEntryOverrides });
-      } catch {
-        try { await setDoc(sharedStateRef(dataUser), { entryOverrides: normalizedEntryOverrides }, { merge: true }); } catch { return; }
-      }
-    }
+    if (dataUser && db) await setDoc(sharedStateRef(dataUser), { entryOverrides: normalizedEntryOverrides }, { mergeFields: ["entryOverrides"] });
+    if (!dataUser || !db) commitLocalData({ settings: { ...financialData.settings, entryOverrides: normalizedEntryOverrides } });
   };
   const saveGoal = async (goal: Goal) => {
-    if (!canEditData) throw new Error("Read-only membership");
+    if (!canEditData) throw new Error("Alterações indisponíveis.");
+    if (dataUser && db) await setDoc(doc(db, "users", dataUser.uid, "goals", goal.id), goal);
     const nextGoals = [...goals.filter((item) => item.id !== goal.id), goal];
-    setGoals(nextGoals);
-    localStorage.setItem(goalsStorageKey(dataUser?.uid ?? "local"), JSON.stringify(nextGoals));
-    if (dataUser && db) {
-      try {
-        await setDoc(doc(db, "users", dataUser.uid, "goals", goal.id), goal);
-        setGoalsSyncError("");
-      } catch {
-        setGoalsSyncError("Sincronização indisponível; objetivo mantido neste dispositivo.");
-        throw new Error("Goal sync failed");
-      }
-    }
+    if (!dataUser || !db) commitLocalData({ goals: nextGoals });
+    setGoalsSyncError("");
   };
   const savePayPeriod = async (period: EditablePayPeriod, previousDate?: string) => {
     if (!canEditData) throw new Error("Edit permission required");
@@ -832,13 +777,11 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       await batch.commit();
       return;
     }
-    setPlanningPeriods((current) => {
-      const merged = { ...period, receivedIncome: { ...existingPeriod?.receivedIncome, ...period.receivedIncome } };
-      return [...current.filter((item) => item.date !== previousDate && item.date !== period.date), merged].sort((left, right) => left.date.localeCompare(right.date));
+    const merged = { ...period, receivedIncome: { ...existingPeriod?.receivedIncome, ...period.receivedIncome } };
+    commitLocalData({
+      periods: [...planningPeriods.filter((item) => item.date !== previousDate && item.date !== period.date), merged].sort((a, b) => a.date.localeCompare(b.date)),
+      occurrences: previousDate && previousDate !== period.date ? billOccurrences.map((item) => item.periodDate === previousDate ? { ...item, periodDate: period.date } : item) : billOccurrences,
     });
-    if (previousDate && previousDate !== period.date) {
-      setBillOccurrences((current) => current.map((occurrence) => occurrence.periodDate === previousDate ? { ...occurrence, periodDate: period.date } : occurrence));
-    }
   };
   const saveBillTemplate = async (bill: BillTemplate) => {
     if (!canEditData) throw new Error("Edit permission required");
@@ -867,11 +810,12 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       await batch.commit();
       return;
     }
-    setBillTemplates((current) => [...current.filter((item) => item.id !== bill.id), bill]);
-    setBillOccurrences((current) => [
-      ...current.filter((item) => item.billId !== bill.id || item.status === "paid" || item.dueDate < dateKey(new Date())),
-      ...occurrences.filter((item) => !existingBillOccurrences.some((currentItem) => currentItem.id === item.id)),
-    ]);
+    const kept = billOccurrences.filter((item) => item.billId !== bill.id || item.status === "paid" || (!occurrencesById.has(item.id) && item.dueDate < dateKey(new Date())));
+    const keptIds = new Set(kept.map((item) => item.id));
+    commitLocalData({ bills: [...billTemplates.filter((item) => item.id !== bill.id), bill], occurrences: [...kept, ...occurrences.filter((item) => !keptIds.has(item.id)).map((item) => {
+      const old = existingBillOccurrences.find((existing) => existing.id === item.id);
+      return { ...item, history: old?.history ?? [], paidAmount: old?.paidAmount ?? 0 };
+    })] });
   };
   const receiveIncome = async (periodDate: string, recipient: IncomeRecipient, payment: ReceivedPayment) => {
     if (!canEditData) throw new Error("Edit permission required");
@@ -902,15 +846,11 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       });
       return;
     }
-    setPlanningPeriods((current) => current.map((period) => {
-      if (period.date !== periodDate) return period;
-      const received = period.receivedIncome?.[recipient] ?? [];
-      const plannedAmount = period.income[recipient];
-      if (received.reduce((total, item) => total + item.actualAmount, 0) + receipt.actualAmount > plannedAmount + 0.005) {
-        throw new Error("Receipt exceeds planned income");
-      }
-      return { ...period, receivedIncome: { ...period.receivedIncome, [recipient]: [...received, receipt] } };
-    }));
+    const period = planningPeriods.find((item) => item.date === periodDate);
+    if (!period) throw new Error("Período não encontrado.");
+    const received = period.receivedIncome?.[recipient] ?? [];
+    if (received.reduce((sum, item) => sum + item.actualAmount, 0) + receipt.actualAmount > period.income[recipient] + 0.005) throw new Error("Recebimento maior que a previsão.");
+    commitLocalData({ periods: planningPeriods.map((item) => item.date === periodDate ? { ...item, receivedIncome: { ...item.receivedIncome, [recipient]: [...received, receipt] } } : item) });
   };
   const toggleBillOccurrence = async (occurrenceId: string) => {
     if (!canEditData) throw new Error("Edit permission required");
@@ -934,9 +874,7 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       });
       return;
     }
-    setBillOccurrences((current) => current.map((item) => item.id === occurrenceId
-      ? toggleBillOccurrencePayment(item, eventId, eventDate)
-      : item));
+    commitLocalData({ occurrences: billOccurrences.map((item) => item.id === occurrenceId ? toggleBillOccurrencePayment(item, eventId, eventDate) : item) });
   };
   const deleteGoal = async (goalId: string) => {
     if (!canDeleteData) throw new Error("Delete permission required");
@@ -969,8 +907,7 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       }
     }
     const nextGoals = goals.filter((goal) => goal.id !== goalId);
-    setGoals(nextGoals);
-    localStorage.setItem(goalsStorageKey(dataUser?.uid ?? "local"), JSON.stringify(nextGoals));
+    if (!dataUser || !db) commitLocalData({ goals: nextGoals });
     setGoalsSyncError("");
   };
   const contributeToGoal = async (goalId: string, amount: number, source: GoalIncomeSource) => {
@@ -1029,8 +966,7 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
       const nextGoals = goals.map((goal) => goal.id === goalId
         ? { ...goal, saved: goal.saved + amount, contributions: [...goal.contributions, contribution] }
         : goal);
-      setGoals(nextGoals);
-      localStorage.setItem(goalsStorageKey(dataUser?.uid ?? "local"), JSON.stringify(nextGoals));
+      if (!dataUser || !db) commitLocalData({ goals: nextGoals });
       setGoalsSyncError("");
     } catch {
       setGoalsSyncError("Aporte não registrado; confira o saldo ou a sincronização.");
@@ -1152,13 +1088,14 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const nextPaymentDate = new Date(`${upcomingPayment.date}T12:00:00`);
   const daysUntilNextPayment = Math.max(0, Math.ceil((nextPaymentDate.getTime() - openedAt.getTime()) / 86400000));
   const changeCalendarMonth = (offset: number) => { setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1)); setSelectedDay(null); };
-  const toggleBill = (key: string) => setBillPaidState((current) => {
-    if (!canEditData) return current;
-    const nextState = { ...current, [key]: !current[key] };
-    localStorage.setItem(billsStorageKey(dataUser), JSON.stringify(nextState));
-    if (dataUser && db) void setDoc(sharedStateRef(dataUser), { billPaidState: nextState }, { merge: true });
-    return nextState;
-  });
+  const toggleBill = (key: string) => {
+    if (!canEditData) return;
+    void reportOperation(async () => {
+      const nextState = { ...billPaidState, [key]: !billPaidState[key] };
+      if (dataUser && db) await setDoc(sharedStateRef(dataUser), { billPaidState: nextState }, { merge: true });
+      if (!dataUser || !db) commitLocalData({ settings: { ...financialData.settings, billPaidState: nextState } });
+    }).catch(() => {});
+  };
   const isBillPaid = (key: string) => Boolean(billPaidState[key]);
   const handleSignOut = async () => { if (!onSignOut) return; setIsSigningOut(true); setSignOutError(""); try { await onSignOut(); } catch { setSignOutError("Não foi possível sair agora."); setIsSigningOut(false); } };
   const planningPageProps = {
@@ -1179,13 +1116,13 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     canEditData,
     canDeleteData,
     goalsSyncError,
-    onCreateGoal: canEditData ? saveGoal : undefined,
-    onDeleteGoal: canDeleteData ? deleteGoal : undefined,
-    onContributeGoal: canEditData ? contributeToGoal : undefined,
-    onCreatePayPeriod: canEditData ? savePayPeriod : undefined,
-    onReceiveIncome: canEditData ? receiveIncome : undefined,
-    onCreateBillTemplate: canEditData ? saveBillTemplate : undefined,
-    onToggleBillOccurrence: canEditData ? toggleBillOccurrence : undefined,
+    onCreateGoal: canEditData ? (...args: Parameters<typeof saveGoal>) => reportOperation(() => saveGoal(...args)) : undefined,
+    onDeleteGoal: canDeleteData ? (...args: Parameters<typeof deleteGoal>) => reportOperation(() => deleteGoal(...args)) : undefined,
+    onContributeGoal: canEditData ? (...args: Parameters<typeof contributeToGoal>) => reportOperation(() => contributeToGoal(...args)) : undefined,
+    onCreatePayPeriod: canEditData ? (...args: Parameters<typeof savePayPeriod>) => reportOperation(() => savePayPeriod(...args)) : undefined,
+    onReceiveIncome: canEditData ? (...args: Parameters<typeof receiveIncome>) => reportOperation(() => receiveIncome(...args)) : undefined,
+    onCreateBillTemplate: canEditData ? (...args: Parameters<typeof saveBillTemplate>) => reportOperation(() => saveBillTemplate(...args)) : undefined,
+    onToggleBillOccurrence: canEditData ? (...args: Parameters<typeof toggleBillOccurrence>) => reportOperation(() => toggleBillOccurrence(...args)) : undefined,
     householdId: dataOwnerUid ?? undefined,
     householdError,
     accessLevel,
@@ -1196,23 +1133,37 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
     onUpdateMemberAccess: accessLevel === "owner" ? updateMemberAccess : undefined,
     onRemoveMember: accessLevel === "owner" ? removeMember : undefined,
     onRevokeInvite: accessLevel === "owner" ? revokeInvite : undefined,
+    syncStatus,
+    backupActions: {
+      ownerUid: dataOwnerUid ?? "local", canRestore: accessLevel === "owner",
+      available: !localLoad.error && !sync.pending && ((!dataOwnerUid || !db) || syncStatus === "synced"),
+      read: readBackupData,
+      readForRestore: !dataOwnerUid && !localHasData ? async () => emptyFinanceData() : readBackupData,
+      restoreNotice: !dataOwnerUid && !localHasData ? "Este navegador ainda não tem dados salvos. Ao confirmar, os dados iniciais de exemplo serão substituídos pelo backup." : undefined,
+      restore: restoreBackup,
+    },
   };
   const pageContent = activeView === "payments"
     ? <CalendarPage calendarMonth={calendarMonth} calendarItems={calendarItems} selectedDay={selectedDay} onChangeMonth={changeCalendarMonth} onSelectDay={setSelectedDay} />
     : activeView === "dashboard"
-      ? <DashboardPage movements={movements} periods={activePlanningPeriods} goals={goals} canEditData={canEditData} canDeleteData={canDeleteData} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} onToggleBillOccurrence={canEditData ? toggleBillOccurrence : undefined} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void deleteMovement(movementId); }} onSaveMovement={submitMovement} sharedEntryOverrides={entryOverrides} onEntryOverridesChange={(overrides) => { void saveEntryOverrides(overrides); }} onOpenCalendar={() => changeView("payments")} onOpenMovement={() => { if (canEditData) setIsMovementModalOpen(true); }} storageKey={dataOwnerUid ?? "local"} />
+      ? <DashboardPage movements={movements} periods={activePlanningPeriods} goals={goals} canEditData={canEditData} canDeleteData={canDeleteData} greeting={greeting} openedDateLabel={openedDateLabel} daysUntilNextPayment={daysUntilNextPayment} onToggleBill={toggleBill} onToggleBillOccurrence={canEditData ? (...args: Parameters<typeof toggleBillOccurrence>) => reportOperation(() => toggleBillOccurrence(...args)) : undefined} isBillPaid={isBillPaid} onDeleteMovement={(movementId) => { void reportOperation(() => deleteMovement(movementId)).catch(() => {}); }} onSaveMovement={submitMovement} sharedEntryOverrides={entryOverrides} onEntryOverridesChange={(overrides) => { void reportOperation(() => saveEntryOverrides(overrides)).catch(() => {}); }} onOpenCalendar={() => changeView("payments")} onOpenMovement={() => { if (canEditData) setIsMovementModalOpen(true); }} storageKey={dataOwnerUid ?? "local"} />
       : activeView === "bills" ? <BillsPage {...planningPageProps} />
         : activeView === "income" ? <IncomePage {...planningPageProps} />
           : activeView === "goals" ? <GoalsPage {...planningPageProps} />
             : activeView === "members" ? <MembersPage {...planningPageProps} />
               : <SettingsPage {...planningPageProps} />;
 
-  if (!householdLoaded || !movementsLoaded || !goalsLoaded || !planningLoaded) return null;
+  if (localLoad.error) return <LocalDataRecovery />;
+  if (!householdLoaded || !movementsLoaded || !goalsLoaded || !planningLoaded) return <main className="app-loading" role="status"><p>{syncLabels[syncStatus]}</p><p>Carregando seu orçamento…</p><button className="outline-button" onClick={() => window.location.reload()}>Tentar novamente</button></main>;
   return (
     <main className="app-shell">
-      <AppNavigation isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} activeView={activeView} onNavigate={changeView} />
+      <AppNavigation syncStatus={syncStatus} isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} activeView={activeView} onNavigate={changeView} />
       <section className="content">
         <AppTopbar user={user} calendarMonth={calendarMonth} isCalendarView={activeView === "payments"} initials={initials} onMenuOpen={() => setIsMenuOpen(true)} onCalendarOpen={() => changeView("payments")} onDashboard={() => changeView("dashboard")} onProfileOpen={() => setIsProfileOpen(true)} />
+        <div className={`sync-banner sync-${syncStatus}`} role="status" aria-live="polite">
+          <span>{syncLabels[syncStatus]}{syncError ? ` · ${syncError}` : ""}</span>
+          {syncStatus === "error" && <button className="text-button" onClick={() => { setOperationError(""); setGoalsSyncError(""); sync.retry(); }}>Verificar novamente</button>}
+        </div>
         {pageContent}
         {isProfileOpen && <ProfileModal user={user} displayName={displayName} initials={initials} signOutError={signOutError} isSigningOut={isSigningOut} onClose={() => setIsProfileOpen(false)} onSignOut={onSignOut ? () => void handleSignOut() : undefined} />}
         {isMovementModalOpen && <MovementModal

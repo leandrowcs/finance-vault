@@ -5,7 +5,7 @@ App web para planejamento financeiro doméstico por pagamento quinzenal.
 Receitas previstas e recebidas, contas recorrentes com histórico de pagamento, objetivos com aportes e orçamento compartilhado por convite. Moeda: CAD.
 
 - [Regras do saldo, exemplos e limites](docs/balance-rules.md)
-- [Batch 4: decisões de backup/exportação, offline e validação](docs/readiness.md)
+- [Exportação/restauração, sincronização e validação](docs/readiness.md)
 - [Histórico de decisões do produto](docs/product-decisions.md)
 
 ## Local
@@ -66,6 +66,6 @@ npm run build
 
 `test:flows` executa os fluxos de domínio. `test:rules` requer Firebase CLI e Java instalados e inicia um emulador isolado no projeto `demo-financevault`; inclui os fluxos de persistência e convites. Sem emulador, `npm test` ignora a suíte Firestore. Os testes não enviam convites reais nem acessam dados de produção.
 
-O saldo do mês soma os cartões de pagamento e pode incluir previsões. O disponível para objetivos considera recebimentos e reserva contas futuras antes de liberar aportes. Veja as [regras detalhadas](docs/balance-rules.md).
+O saldo projetado do mês soma os cartões de pagamento e inclui previsões. O dashboard distingue receitas recebidas e a receber; esse saldo não é saldo bancário. O disponível para objetivos considera recebimentos e reserva contas futuras antes de liberar aportes. Veja as [regras detalhadas](docs/balance-rules.md).
 
-A PWA e o cache local não garantem edição offline nem recuperação de dados. Exportação/restauração e backup automático ainda não estão implementados/configurados; a estratégia e os limites estão em [Prontidão](docs/readiness.md).
+Configurações oferece exportação JSON/CSV e restauração JSON com prévia, deduplicação, confirmação e bloqueio de conflitos. O indicador global acompanha gravações pendentes e confirmação do servidor. A edição autenticada exige conexão; o modo local grava um conjunto versionado dos dados no navegador. Backup automático não está configurado. Consulte os limites e a recuperação em [Prontidão](docs/readiness.md).

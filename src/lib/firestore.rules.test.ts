@@ -12,14 +12,17 @@ import {
   setDoc,
   updateDoc,
   writeBatch,
+  type Firestore,
 } from "firebase/firestore";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { createBackup, type FinanceData } from "./backup";
+import { readFinanceData, restoreFinanceData } from "./backupFirestore";
 
 const firestoreEmulator = process.env.FIRESTORE_EMULATOR_HOST;
 const rulesDescribe = firestoreEmulator ? describe : describe.skip;
 let environment: RulesTestEnvironment;
 
-rulesDescribe("Firestore household access rules", () => {
+rulesDescribe("Firestore household access rules", { timeout: 30_000, hookTimeout: 30_000 }, () => {
   beforeAll(async () => {
     environment = await initializeTestEnvironment({
       projectId: "financevault-rules-tests",
@@ -61,6 +64,49 @@ rulesDescribe("Firestore household access rules", () => {
     });
   }
 
+  function backupData(): FinanceData {
+    return {
+      movements: [{ id: "restored", amount: 100, date: "2026-10-01", type: "income", description: "Receipt", category: "Salário", owner: "Você" }],
+      goals: [{ id: "saved-goal", name: "Trip", target: 100, saved: 20, contributions: [{ id: "contribution", amount: 20, date: "2026-10-01", incomeSourceId: "restored" }] }],
+      periods: [], bills: [], occurrences: [],
+      settings: { billPaidState: {}, entryOverrides: {}, incomeAllocations: { restored: 20 } },
+    };
+  }
+  it("restores financial data atomically and repeats without duplicate contributions", async () => {
+    const firestore = environment.authenticatedContext("restore-owner").firestore() as unknown as Firestore;
+    const data = backupData();
+    const backup = createBackup("source-owner", data);
+    expect((await getDoc(doc(firestore, "users", "restore-owner", "goals", "saved-goal"))).exists()).toBe(false);
+    await restoreFinanceData(firestore, "restore-owner", backup);
+    expect(await readFinanceData(firestore, "restore-owner")).toEqual(data);
+    await restoreFinanceData(firestore, "restore-owner", backup);
+    expect(await readFinanceData(firestore, "restore-owner")).toEqual(data);
+    expect((await getDoc(doc(firestore, "users", "restore-owner", "memberships", "source-owner"))).exists()).toBe(false);
+  });
+  it("rechecks conflicts at commit and writes nothing when an existing record changed", async () => {
+    const firestore = environment.authenticatedContext("conflict-owner").firestore() as unknown as Firestore;
+    const backup = createBackup("conflict-owner", backupData());
+    await setDoc(doc(firestore, "users", "conflict-owner", "movements", "restored"), { ...backup.data.movements[0], amount: 200 });
+    await expect(restoreFinanceData(firestore, "conflict-owner", backup)).rejects.toThrow(/conflitam/);
+    expect((await getDoc(doc(firestore, "users", "conflict-owner", "goals", "saved-goal"))).exists()).toBe(false);
+    expect((await getDoc(doc(firestore, "users", "conflict-owner", "settings", "shared"))).exists()).toBe(false);
+    expect((await getDoc(doc(firestore, "users", "conflict-owner", "movements", "restored"))).data()?.amount).toBe(200);
+  });
+  it("includes existing goals outside the backup when validating restored reservations", async () => {
+    const firestore = environment.authenticatedContext("reservation-owner").firestore() as unknown as Firestore;
+    const data = backupData();
+    await setDoc(doc(firestore, "users", "reservation-owner", "goals", "other"), { ...data.goals[0], id: "other", contributions: [{ ...data.goals[0].contributions[0], id: "other-contribution" }] });
+    await setDoc(doc(firestore, "users", "reservation-owner", "settings", "shared"), data.settings);
+    await expect(restoreFinanceData(firestore, "reservation-owner", createBackup("reservation-owner", data))).rejects.toThrow(/conflitam/);
+    expect((await getDoc(doc(firestore, "users", "reservation-owner", "goals", "saved-goal"))).exists()).toBe(false);
+  });
+  it("rejects restoration by read-only members without partial writes", async () => {
+    await seedMember("read");
+    const firestore = environment.authenticatedContext("member").firestore() as unknown as Firestore;
+    await assertFails(restoreFinanceData(firestore, "owner", createBackup("owner", backupData())));
+    expect((await getDoc(doc(firestore, "users", "owner", "movements", "restored"))).exists()).toBe(false);
+    expect((await getDoc(doc(firestore, "users", "owner", "goals", "saved-goal"))).exists()).toBe(false);
+  });
   it("lets readers see owner data but not change it", async () => {
     await seedMember("read");
     const firestore = environment.authenticatedContext("member", { email: "member@example.com" }).firestore();

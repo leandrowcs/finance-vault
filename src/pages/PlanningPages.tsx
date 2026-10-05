@@ -3,12 +3,16 @@ import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
 import { financePeriods, type SeedPayPeriod } from "../data/financeSeed";
 import { calculateFinanceLedger, currency, dateKey, resolveFinancialEntries } from "../lib/finance";
+import { BackupPanel, type BackupActions } from "../components/BackupPanel";
+import { syncLabels, type SyncStatus } from "../lib/sync";
 import type { BillOccurrence, BillTemplate, EditablePayPeriod, Goal, GoalIncomeSource, HouseholdInvite, HouseholdMember, IncomeRecipient, InviteDeliveryMode, MemberAccessLevel, Movement, ReceivedPayment } from "../types/finance";
 
 type EntryOverride = Partial<Movement> & { deleted?: boolean };
 type EntryOverrides = Record<string, EntryOverride>;
 
 type PlanningPageProps = {
+  syncStatus?: SyncStatus;
+  backupActions?: BackupActions;
   movements: Movement[];
   periods?: SeedPayPeriod[];
   user: User | null;
@@ -584,7 +588,7 @@ export function GoalsPage({ movements, periods = financePeriods, user, displayNa
       setName("");
       setTarget("");
     } catch {
-      setError("Objetivo salvo localmente; sincronização falhou.");
+      setError("Não foi possível salvar o objetivo. Confira a sincronização.");
     }
   };
 
@@ -912,7 +916,7 @@ export function MembersPage({
   );
 }
 
-export function SettingsPage({ user, displayName, onSignOut }: PlanningPageProps) {
+export function SettingsPage({ user, displayName, onSignOut, syncStatus = "local", backupActions }: PlanningPageProps) {
   return (
     <PageFrame eyebrow="PREFERÊNCIAS" title="Configurações" copy="Gerencie seu perfil e a sessão atual.">
       <section className="settings-list">
@@ -927,9 +931,9 @@ export function SettingsPage({ user, displayName, onSignOut }: PlanningPageProps
           <Target size={18} />
           <div>
             <strong>Sincronização</strong>
-            <small>Dados compartilhados pelo Firestore.</small>
+            <small>{syncLabels[syncStatus]}</small>
           </div>
-          <span className="member-status">Ativa</span>
+          <span className="member-status">{syncStatus === "local" ? "Neste dispositivo" : syncStatus === "synced" ? "Confirmada" : "Não confirmada"}</span>
         </article>
         {onSignOut && (
           <button className="outline-button settings-signout" type="button" onClick={onSignOut}>
@@ -938,6 +942,7 @@ export function SettingsPage({ user, displayName, onSignOut }: PlanningPageProps
           </button>
         )}
       </section>
+      {backupActions && <BackupPanel key={backupActions.ownerUid} actions={backupActions} />}
     </PageFrame>
   );
 }

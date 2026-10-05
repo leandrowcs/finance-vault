@@ -17,6 +17,7 @@ import { MovementModal } from "../components/MovementModal";
 import type { SeedPayPeriod } from "../data/financeSeed";
 import { calculateFinanceLedger, cgiPaymentDate, cgiPaymentLabel, currency, dateKey, monthLabels, resolveFinancialEntries, splitOwnerAmount, sumPaymentBalances } from "../lib/finance";
 import type { Bill, Goal, Movement } from "../types/finance";
+import { summarizeIncome } from "../lib/balanceSummary";
 
 type Person = "Leandro" | "Ketlin";
 type ExpenseEntry = {
@@ -47,6 +48,8 @@ type PaymentBalance = {
   balance: number;
 };
 type MonthSummary = {
+  receivedTotal: number;
+  expectedTotal: number;
   key: string;
   label: string;
   incomeTotal: number;
@@ -200,9 +203,9 @@ function MonthDetailsModal({
             </div>
             <article className="month-details-total-card month-details-income-total-card">
               <div>
-                <span>Total acumulado</span>
+                <span>Receitas recebidas + previstas</span>
                 <strong>{currency.format(month.incomeTotal)}</strong>
-                <small>Leandro + Ketlin</small>
+                <small>Recebido até hoje: {currency.format(month.receivedTotal)} · A receber: {currency.format(month.expectedTotal)}</small>
               </div>
               <div className="total-icon">
                 <ArrowUpRight size={21} />
@@ -464,7 +467,7 @@ function MonthDetailsModal({
                   }))
                 }
               >
-                <h2 id="balance-title">Saldo do mês</h2>
+                <h2 id="balance-title">Saldo projetado do mês</h2>
                 {expandedSections.balance ? (
                   <ChevronUp size={16} />
                 ) : (
@@ -477,11 +480,11 @@ function MonthDetailsModal({
             </div>
             <article className="month-details-total-card month-details-balance-total-card">
               <div>
-                <span>Saldo total</span>
+                <span>Saldo projetado · inclui previsões</span>
                 <strong className={month.balance >= 0 ? "positive" : "negative"}>
                   {currency.format(month.balance)}
                 </strong>
-                <small>Receitas menos despesas</small>
+                <small>Receitas recebidas e previstas menos despesas e aportes. Não representa saldo bancário.</small>
               </div>
             </article>
             {expandedSections.balance &&
@@ -511,7 +514,7 @@ function MonthDetailsModal({
                         <strong>{currency.format(payment.savings)}</strong>
                       </p>
                       <p>
-                        <span>Saldo livre</span>
+                        <span>Saldo projetado</span>
                         <strong className={payment.balance >= 0 ? "positive" : "negative"}>
                           {currency.format(payment.balance)}
                         </strong>
@@ -559,15 +562,12 @@ export function DashboardPage({
   useEffect(() => {
     if (sharedEntryOverrides === undefined) return;
     setEntryOverrides(sharedEntryOverrides);
-    localStorage.setItem(entryOverridesStorageKey(storageKey), JSON.stringify(sharedEntryOverrides));
   }, [sharedEntryOverrides, storageKey]);
   const updateEntryOverrides = (update: (current: Record<string, EntryOverride>) => Record<string, EntryOverride>) => {
-    setEntryOverrides((current) => {
-      const next = update(current);
-      localStorage.setItem(entryOverridesStorageKey(storageKey), JSON.stringify(next));
-      onEntryOverridesChange?.(next);
-      return next;
-    });
+    const next = update(entryOverrides);
+    if (onEntryOverridesChange) { onEntryOverridesChange(next); return; }
+    localStorage.setItem(entryOverridesStorageKey(storageKey), JSON.stringify(next));
+    setEntryOverrides(next);
   };
 
   const financialEntries = useMemo(
@@ -576,12 +576,18 @@ export function DashboardPage({
   );
   const contributions = useMemo(() => goals.flatMap((goal) => goal.contributions), [goals]);
   const ledger = useMemo(() => calculateFinanceLedger(financialEntries, contributions), [financialEntries, contributions]);
+  const today = dateKey(new Date());
+  const currentMonthKey = today.slice(0, 7);
+  const currentIncome = summarizeIncome(financialEntries, currentMonthKey, today);
+  const currentLedger = calculateFinanceLedger(financialEntries, contributions, today).get(currentMonthKey);
+  const goalAvailable = (currentLedger?.availableByOwner["Você"] ?? 0) + (currentLedger?.availableByOwner.Esposa ?? 0);
 
   const months = useMemo(() => {
     return Array.from({ length: 12 }, (_, monthIndex) => {
       const date = new Date(currentYear, monthIndex, 1);
       const key = `${date.getFullYear()}-${String(monthIndex + 1).padStart(2, "0")}`;
       const monthEntries = financialEntries.filter((entry) => entry.date.startsWith(key));
+      const incomeSummary = summarizeIncome(financialEntries, key, today);
       const incomeEntries = monthEntries.filter((entry) => entry.type === "income");
 
       const incomeEntriesByPerson: Record<Person, IncomeEntry[]> = {
@@ -762,6 +768,8 @@ export function DashboardPage({
       return {
         key,
         label,
+        receivedTotal: incomeSummary.received,
+        expectedTotal: incomeSummary.expected,
         incomeTotal,
         expenseTotal,
         savingsTotal,
@@ -774,7 +782,7 @@ export function DashboardPage({
         paymentBalances,
       };
     });
-  }, [contributions, currentYear, financialEntries, isBillPaid, ledger]);
+  }, [contributions, currentYear, financialEntries, isBillPaid, ledger, today]);
 
   const selectedMonth =
     months.find((month) => month.key === selectedMonthKey) ?? null;
@@ -827,6 +835,20 @@ export function DashboardPage({
           </p>
         </div>
       </div>
+      <section className="balance-explanation" aria-labelledby="balance-explanation-title">
+        <h2 id="balance-explanation-title">Entenda os saldos</h2>
+        <p><strong>Saldo projetado</strong> inclui receitas ainda não recebidas, desconta despesas cadastradas e aportes. Não é saldo bancário nem um valor liberado para gastar.</p>
+        <div className="balance-facts">
+          <article><span>Recebido neste mês até hoje</span><strong>{currency.format(currentIncome.received)}</strong></article>
+          <article><span>A receber neste mês</span><strong>{currency.format(currentIncome.expected)}</strong></article>
+          <article><span>Disponível para objetivos neste mês</span><strong>{currency.format(goalAvailable)}</strong></article>
+        </div>
+        <details><summary>Como funciona o disponível para objetivos?</summary>
+          <p>Considera receitas recebidas até hoje, reserva despesas cadastradas com vencimento a partir de cada recebimento, incluindo meses futuros, e desconta aportes. É o mesmo cálculo usado em Objetivos.</p>
+          <p>Contas anteriores ao recebimento não são cobertas retroativamente. Confira também contas atrasadas; este valor não representa dinheiro livre para consumo.</p>
+          <p>Leandro: {currency.format(currentLedger?.availableByOwner["Você"] ?? 0)} · Ketlin: {currency.format(currentLedger?.availableByOwner.Esposa ?? 0)}. A disponibilidade não é transferida automaticamente entre responsáveis.</p>
+        </details>
+      </section>
       <section
         className="year-summary-section"
         aria-labelledby="year-summary-title"
@@ -842,7 +864,7 @@ export function DashboardPage({
         </div>
         <div className="year-summary-grid">
           <article className="year-summary-card income">
-            <span>Receitas no ano</span>
+            <span>Receitas recebidas + previstas no ano</span>
             <strong>{currency.format(yearSummary.incomeTotal)}</strong>
             <small>Leandro + Ketlin</small>
           </article>
@@ -857,7 +879,7 @@ export function DashboardPage({
             <small>Transferências para objetivos</small>
           </article>
           <article className="year-summary-card balance">
-            <span>Saldo livre acumulado</span>
+            <span>Saldo projetado do ano</span>
             <strong
               className={yearSummary.balance >= 0 ? "positive" : "negative"}
             >
@@ -895,7 +917,7 @@ export function DashboardPage({
         <div className="section-heading">
           <div>
             <p className="eyebrow">ANO VIGENTE</p>
-            <h2 id="year-overview-title">Balanço mensal</h2>
+            <h2 id="year-overview-title">Planejamento mensal</h2>
           </div>
           <button className="text-button" onClick={onOpenCalendar}>
             Ver calendário <ChevronRight size={15} />
@@ -929,7 +951,7 @@ export function DashboardPage({
                     <span
                       className={month.balance >= 0 ? "positive" : "negative"}
                     >
-                      {currency.format(month.balance)}
+                      <small>Projetado</small> {currency.format(month.balance)}
                     </span>
                     {isExpanded ? (
                       <ChevronUp size={18} />
@@ -942,7 +964,7 @@ export function DashboardPage({
                   <div className="month-accordion-content">
                     <div className="month-quick-summary">
                       <article className="month-quick-card income">
-                        <span>Receitas totais</span>
+                        <span>Receitas recebidas + previstas</span>
                         <strong>{currency.format(month.incomeTotal)}</strong>
                       </article>
                       <article className="month-quick-card expense">
@@ -954,7 +976,7 @@ export function DashboardPage({
                         <strong>{currency.format(month.savingsTotal)}</strong>
                       </article>
                       <article className="month-quick-card balance">
-                        <span>Saldo livre</span>
+                        <span>Saldo projetado</span>
                         <strong
                           className={
                             month.balance >= 0 ? "positive" : "negative"
@@ -964,6 +986,7 @@ export function DashboardPage({
                         </strong>
                       </article>
                     </div>
+                    <p className="balance-month-note">Recebido até hoje: {currency.format(month.receivedTotal)} · A receber: {currency.format(month.expectedTotal)}. Saldo projetado inclui previsões.</p>
                     <div className="month-person-summary">
                       {people.map((person) => (
                         <article key={`${month.key}-${person}`}>

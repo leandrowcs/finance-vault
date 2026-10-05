@@ -9,9 +9,11 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
+import { syncLabels, type SyncStatus } from "../lib/sync";
 
 export type NavigationView = "dashboard" | "payments" | "bills" | "income" | "goals" | "members" | "settings";
 type AppNavigationProps = {
+  syncStatus: SyncStatus;
   isOpen: boolean;
   onClose: () => void;
   activeView: NavigationView;
@@ -19,6 +21,7 @@ type AppNavigationProps = {
 };
 
 export function AppNavigation({
+  syncStatus,
   isOpen,
   onClose,
   activeView,
@@ -100,8 +103,8 @@ export function AppNavigation({
               <Check size={13} />
             </span>
             <p>
-              <strong>Seus dados estão seguros</strong>
-              <small>Sincronizado agora</small>
+              <strong>Estado dos dados</strong>
+              <small>{syncLabels[syncStatus]}</small>
             </p>
           </div>
         </div>
