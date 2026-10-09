@@ -22,13 +22,13 @@ A interface usa o nome **Saldo projetado**, mostra o recebido até hoje e o que 
 
 `resolveFinancialEntries` resolve receitas, contas e ajustes; `calculateFinanceLedger` calcula a reserva por responsável:
 
-1. Ordena receitas recebidas por data.
-2. Para cada receita, cobre despesas do mesmo responsável com vencimento igual ou posterior ao recebimento, priorizando o mesmo mês e depois os meses seguintes, em ordem de vencimento.
-3. Considera todas as ocorrências carregadas, inclusive meses futuros. Contas anteriores ao recebimento não são cobertas retroativamente por ele.
+1. Ordena receitas recebidas por data e, quando há uma data de referência, considera apenas receitas recebidas até essa data.
+2. Despesas do mesmo responsável só reduzem essa disponibilidade quando sua data é igual ou anterior à data de referência. Vencimentos futuros não bloqueiam aportes de receitas já recebidas.
+3. Contas anteriores ao recebimento não são cobertas retroativamente por ele.
 4. Subtrai os aportes já registrados. Aportes antigos sem origem são reservados uma única vez, conforme a capacidade disponível.
-5. A tela de objetivos só oferece receitas recebidas até hoje e saldo do mês atual. Valores negativos não viram capacidade de aporte.
+5. A tela de objetivos oferece receitas recebidas até hoje e saldo do mês atual, descontadas as despesas até hoje. Valores negativos não viram capacidade de aporte.
 
-Exemplo: receita recebida de 1.000, conta de 600 neste mês, conta futura de 200 e aporte de 50 deixam **150 CAD** disponíveis para o mesmo responsável.
+Exemplo: até hoje, uma receita recebida de 1.000 e uma despesa de 600 deixam 400 CAD disponíveis. Uma conta com vencimento futuro não reduz esse valor até sua data.
 
 O saldo interno do ledger é `disponível dos responsáveis − despesas sem cobertura`. Ele pode diferir do saldo do dashboard, que usa agrupamentos de pagamentos e inclui previsões. Não usar esses indicadores como sinônimos.
 

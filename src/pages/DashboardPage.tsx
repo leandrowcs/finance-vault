@@ -835,20 +835,32 @@ export function DashboardPage({
           </p>
         </div>
       </div>
-      <section className="balance-explanation" aria-labelledby="balance-explanation-title">
-        <h2 id="balance-explanation-title">Entenda os saldos</h2>
+      <details className="balance-explanation" open>
+        <summary><h2 id="balance-explanation-title">Entenda os saldos</h2></summary>
         <p><strong>Saldo projetado</strong> inclui receitas ainda não recebidas, desconta despesas cadastradas e aportes. Não é saldo bancário nem um valor liberado para gastar.</p>
         <div className="balance-facts">
           <article><span>Recebido neste mês até hoje</span><strong>{currency.format(currentIncome.received)}</strong></article>
           <article><span>A receber neste mês</span><strong>{currency.format(currentIncome.expected)}</strong></article>
           <article><span>Disponível para objetivos neste mês</span><strong>{currency.format(goalAvailable)}</strong></article>
+          <article>
+            <span>Saldo dos objetivos</span>
+            {goals.length === 0 ? (
+              <strong>{currency.format(0)}</strong>
+            ) : (
+              <ul className="balance-goal-list">
+                {goals.map((goal) => (
+                  <li key={goal.id}><span>{goal.name}</span><strong>{currency.format(goal.saved)}</strong></li>
+                ))}
+              </ul>
+            )}
+          </article>
         </div>
         <details><summary>Como funciona o disponível para objetivos?</summary>
           <p>Considera receitas recebidas até hoje, reserva despesas cadastradas com vencimento a partir de cada recebimento, incluindo meses futuros, e desconta aportes. É o mesmo cálculo usado em Objetivos.</p>
           <p>Contas anteriores ao recebimento não são cobertas retroativamente. Confira também contas atrasadas; este valor não representa dinheiro livre para consumo.</p>
           <p>Leandro: {currency.format(currentLedger?.availableByOwner["Você"] ?? 0)} · Ketlin: {currency.format(currentLedger?.availableByOwner.Esposa ?? 0)}. A disponibilidade não é transferida automaticamente entre responsáveis.</p>
         </details>
-      </section>
+      </details>
       <section
         className="year-summary-section"
         aria-labelledby="year-summary-title"

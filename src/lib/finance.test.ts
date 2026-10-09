@@ -290,6 +290,27 @@ describe("monthly allocation", () => {
     expect(month?.unfundedExpensesByOwner["Você"]).toBe(40);
   });
 
+  it("does not reserve current received income for expenses dated after today", () => {
+    const entries = resolveFinancialEntries([], {}, [
+      period("2026-10-01", {
+        income: { leandro: 100, ketlin: 0, extras: 0, leiaUniversitySavings: 0 },
+        receivedIncome: { leandro: [{ id: "salary", actualAmount: 100, receivedAt: "2026-10-01" }] },
+        bills: [
+          { id: "current", name: "Current expense", owner: "Você", amount: 40, due: "08 out", dueDate: "2026-10-08", category: "Casa", paid: false },
+          { id: "future", name: "Future expense", owner: "Você", amount: 100, due: "10 nov", dueDate: "2026-11-10", category: "Casa", paid: false },
+        ],
+      }),
+      period("2026-11-01", {
+        income: { leandro: 100, ketlin: 0, extras: 0, leiaUniversitySavings: 0 },
+        receivedIncome: { leandro: [{ id: "future-salary", actualAmount: 100, receivedAt: "2026-11-01" }] },
+      }),
+    ]);
+    const month = calculateFinanceLedger(entries, [], "2026-10-09").get("2026-10");
+
+    expect(month?.receivedByOwner["Você"]).toBe(100);
+    expect(month?.availableByOwner["Você"]).toBe(60);
+  });
+
   it("reserves unassigned legacy contributions once", () => {
     const entries = resolveFinancialEntries([], {}, [period("2026-09-01", {
       income: { leandro: 100, ketlin: 0, extras: 0, leiaUniversitySavings: 0 },

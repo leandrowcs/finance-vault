@@ -258,7 +258,12 @@ export function calculateFinanceLedger(
   obligations.sort((left, right) => left.date.localeCompare(right.date) || left.id.localeCompare(right.id));
   incomeLots.forEach((lot) => {
     const candidates = obligations
-      .filter((obligation) => obligation.owner === lot.owner && obligation.date >= lot.date && obligation.remaining > 0)
+      .filter((obligation) =>
+        obligation.owner === lot.owner &&
+        obligation.date >= lot.date &&
+        (!asOfDate || obligation.date <= asOfDate) &&
+        obligation.remaining > 0,
+      )
       .sort((left, right) => {
         const leftPriority = left.date.slice(0, 7) === lot.date.slice(0, 7) ? 0 : 1;
         const rightPriority = right.date.slice(0, 7) === lot.date.slice(0, 7) ? 0 : 1;

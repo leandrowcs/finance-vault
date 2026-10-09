@@ -88,7 +88,7 @@ describe("FinanceVault domain flows", () => {
     }
   });
 
-  it("reserves future bills before goal transfers and releases contributions when a goal is removed", () => {
+  it("keeps future bills available for goal transfers and releases contributions when a goal is removed", () => {
     const period = plannedPeriod();
     period.receivedIncome = { leandro: [{ id: "salary", actualAmount: 1000, receivedAt: date }] };
     period.bills = [
@@ -98,7 +98,7 @@ describe("FinanceVault domain flows", () => {
     const entries = resolveFinancialEntries([], {}, [period]);
     const goals: Goal[] = [{ id: "trip", name: "Trip", target: 200, saved: 0, contributions: [] }];
     const month = () => calculateFinanceLedger(entries, goals.flatMap((goal) => goal.contributions), date).get("2026-10");
-    expect(month()?.availableByOwner["Você"]).toBe(200);
+    expect(month()?.availableByOwner["Você"]).toBe(1000);
     expect(goals[0].saved).toBe(0);
 
     goals[0].contributions.push({
@@ -106,13 +106,13 @@ describe("FinanceVault domain flows", () => {
       incomeSourceId: "income-balance:Você:2026-10", incomeSourceOwner: "Você",
     });
     goals[0].saved = 50;
-    expect(month()?.availableByOwner["Você"]).toBe(150);
+    expect(month()?.availableByOwner["Você"]).toBe(950);
     expect(month()?.goalContributionsTotal).toBe(50);
     expect(month()?.incomeTotal).toBe(1000);
     expect(month()?.expenseTotal).toBe(600);
 
     goals.splice(0, 1);
-    expect(month()?.availableByOwner["Você"]).toBe(200);
+    expect(month()?.availableByOwner["Você"]).toBe(1000);
     expect(month()?.goalContributionsTotal).toBe(0);
     expect(month()?.incomeTotal).toBe(1000);
   });
