@@ -9,10 +9,10 @@ export function resolveSyncStatus(remote: boolean, online: boolean, sources: Syn
   return "synced";
 }
 export const syncLabels: Record<SyncStatus, string> = {
-  local: "Salvo neste navegador",
-  offline: "Sem conexão — alterações bloqueadas",
-  loading: "Aguardando confirmação do servidor",
+  local: "Salvo neste navegador.",
+  offline: "Sem conexão — alterações bloqueadas.",
+  loading: "Aguardando confirmação do servidor...",
   saving: "Salvando alterações…",
-  synced: "Dados financeiros confirmados no servidor",
-  error: "Falha de sincronização — confira os dados",
+  synced: "Dados financeiros confirmados no servidor.",
+  error: "Falha de sincronização — confira os dados.",
 };

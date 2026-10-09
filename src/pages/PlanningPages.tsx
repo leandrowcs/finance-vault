@@ -154,17 +154,17 @@ function groupItemsByMonth<T extends { id: string; amount: number; date: string;
   return [...groups.values()].sort((left, right) => left.key.localeCompare(right.key));
 }
 
-function useExpandedMonth(groups: { key: string }[]) {
+function useExpandedMonth(groups: { key: string }[], expandLatest = true) {
   const [expandedKey, setExpandedKey] = useState<string | null>(
-    groups.at(-1)?.key ?? null,
+    expandLatest ? groups.at(-1)?.key ?? null : null,
   );
 
   useEffect(() => {
     setExpandedKey((current) => {
       if (current && groups.some((group) => group.key === current)) return current;
-      return groups.at(-1)?.key ?? null;
+      return expandLatest ? groups.at(-1)?.key ?? null : null;
     });
-  }, [groups]);
+  }, [expandLatest, groups]);
 
   return { expandedKey, setExpandedKey };
 }
@@ -406,7 +406,7 @@ export function BillsPage({ movements, periods = financePeriods, billTemplates =
     return groupItemsByMonth(items);
   }, [billOccurrences, movements, periods, isBillPaid, sharedEntryOverrides]);
 
-  const { expandedKey, setExpandedKey } = useExpandedMonth(monthGroups);
+  const { expandedKey, setExpandedKey } = useExpandedMonth(monthGroups, false);
 
   return (
     <PageFrame

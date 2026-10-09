@@ -289,6 +289,17 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
   const canDeleteData = (accessLevel === "delete" || accessLevel === "owner") && mutationsAllowed;
   const syncError = localLoad.error || operationError || sync.error || planningError || goalsSyncError || householdError;
   const syncStatus = sync.status === "offline" ? "offline" as const : syncError ? "error" as const : sync.status;
+  const dataReady = householdLoaded && movementsLoaded && goalsLoaded && planningLoaded;
+  const [showSyncedBanner, setShowSyncedBanner] = useState(false);
+  useEffect(() => {
+    if (syncStatus !== "synced" || !dataReady) {
+      setShowSyncedBanner(false);
+      return;
+    }
+    setShowSyncedBanner(true);
+    const timeout = window.setTimeout(() => setShowSyncedBanner(false), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [dataReady, syncStatus]);
   const reportOperation = async <T,>(operation: () => Promise<T>): Promise<T> => {
     setOperationError("");
     try { return await sync.run(operation); }
@@ -1154,16 +1165,29 @@ export default function App({ user = null, onSignOut }: AppProps = {}) {
               : <SettingsPage {...planningPageProps} />;
 
   if (localLoad.error) return <LocalDataRecovery />;
-  if (!householdLoaded || !movementsLoaded || !goalsLoaded || !planningLoaded) return <main className="app-loading" role="status"><p>{syncLabels[syncStatus]}</p><p>Carregando seu orçamento…</p><button className="outline-button" onClick={() => window.location.reload()}>Tentar novamente</button></main>;
+  if (!dataReady) return (
+    <main className="access-screen app-loading" role="status" aria-live="polite">
+      <section className="access-card">
+        <img className="access-logo" src="/icons/finance-vault-logo.svg" alt="FinanceVault" />
+        <p className="eyebrow">FINANCE VAULT</p>
+        <h1>Confirmando seus dados</h1>
+        <p>{syncLabels[syncStatus]}</p>
+        <p>Carregando seu orçamento…</p>
+        {syncStatus === "error" && <button className="access-button secondary" onClick={() => window.location.reload()}>Recarregar dados</button>}
+      </section>
+    </main>
+  );
   return (
     <main className="app-shell">
       <AppNavigation syncStatus={syncStatus} isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} activeView={activeView} onNavigate={changeView} />
       <section className="content">
         <AppTopbar user={user} calendarMonth={calendarMonth} isCalendarView={activeView === "payments"} initials={initials} onMenuOpen={() => setIsMenuOpen(true)} onCalendarOpen={() => changeView("payments")} onDashboard={() => changeView("dashboard")} onProfileOpen={() => setIsProfileOpen(true)} />
-        <div className={`sync-banner sync-${syncStatus}`} role="status" aria-live="polite">
-          <span>{syncLabels[syncStatus]}{syncError ? ` · ${syncError}` : ""}</span>
-          {syncStatus === "error" && <button className="text-button" onClick={() => { setOperationError(""); setGoalsSyncError(""); sync.retry(); }}>Verificar novamente</button>}
-        </div>
+        {(syncStatus !== "synced" || showSyncedBanner) && (
+          <div className={`sync-banner sync-${syncStatus}`} role="status" aria-live="polite">
+            <span>{syncLabels[syncStatus]}{syncError ? ` · ${syncError}` : ""}</span>
+            {syncStatus === "error" && <button className="text-button" onClick={() => { setOperationError(""); setGoalsSyncError(""); sync.retry(); }}>Verificar novamente</button>}
+          </div>
+        )}
         {pageContent}
         {isProfileOpen && <ProfileModal user={user} displayName={displayName} initials={initials} signOutError={signOutError} isSigningOut={isSigningOut} onClose={() => setIsProfileOpen(false)} onSignOut={onSignOut ? () => void handleSignOut() : undefined} />}
         {isMovementModalOpen && <MovementModal

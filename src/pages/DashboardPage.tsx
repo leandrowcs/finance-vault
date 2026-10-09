@@ -835,7 +835,7 @@ export function DashboardPage({
           </p>
         </div>
       </div>
-      <details className="balance-explanation" open>
+      <details className="balance-explanation">
         <summary><h2 id="balance-explanation-title">Entenda os saldos</h2></summary>
         <p><strong>Saldo projetado</strong> inclui receitas ainda não recebidas, desconta despesas cadastradas e aportes. Não é saldo bancário nem um valor liberado para gastar.</p>
         <div className="balance-facts">
