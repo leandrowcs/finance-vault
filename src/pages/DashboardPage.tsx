@@ -46,6 +46,7 @@ type PaymentBalance = {
   expense: number;
   savings: number;
   balance: number;
+  carriedIn?: number;
 };
 type MonthSummary = {
   receivedTotal: number;
@@ -56,6 +57,7 @@ type MonthSummary = {
   expenseTotal: number;
   savingsTotal: number;
   balance: number;
+  carryIn: number;
   incomeByPerson: Record<Person, number>;
   expenseByPerson: Record<Person, number>;
   incomeEntriesByPerson: Record<Person, IncomeEntry[]>;
@@ -505,6 +507,9 @@ function MonthDetailsModal({
                         <span>Receitas</span>
                         <strong>{currency.format(payment.income)}</strong>
                       </p>
+                      {payment.carriedIn !== undefined && (
+                        <small>Inclui {currency.format(payment.carriedIn)} de saldo do mês anterior.</small>
+                      )}
                       <p>
                         <span>Despesas</span>
                         <strong>{currency.format(payment.expense)}</strong>
@@ -583,7 +588,7 @@ export function DashboardPage({
   const goalAvailable = (currentLedger?.availableByOwner["Você"] ?? 0) + (currentLedger?.availableByOwner.Esposa ?? 0);
 
   const months = useMemo(() => {
-    return Array.from({ length: 12 }, (_, monthIndex) => {
+    const baseMonths = Array.from({ length: 12 }, (_, monthIndex) => {
       const date = new Date(currentYear, monthIndex, 1);
       const key = `${date.getFullYear()}-${String(monthIndex + 1).padStart(2, "0")}`;
       const monthEntries = financialEntries.filter((entry) => entry.date.startsWith(key));
@@ -774,6 +779,7 @@ export function DashboardPage({
         expenseTotal,
         savingsTotal,
         balance: sumPaymentBalances(paymentBalances),
+        carryIn: 0,
         incomeByPerson,
         expenseByPerson,
         incomeEntriesByPerson,
@@ -781,6 +787,29 @@ export function DashboardPage({
         relatedExpenseCards,
         paymentBalances,
       };
+    });
+
+    // Pagamento do fim do mês que cobre contas do mês seguinte: o saldo restante entra como receita no mês seguinte.
+    return baseMonths.map((month, index) => {
+      const previous = baseMonths[index - 1];
+      if (!previous) return month;
+      let carryIn = 0;
+      const paymentBalances = month.paymentBalances.map((payment) => {
+        const origin = previous.paymentBalances.find(
+          (candidate) => candidate.label === payment.label && candidate.date === payment.date,
+        );
+        if (!origin) return payment;
+        const carried = origin.balance;
+        carryIn += carried;
+        return {
+          ...payment,
+          income: payment.income + carried,
+          balance: payment.balance + carried,
+          carriedIn: carried,
+        };
+      });
+      if (carryIn === 0) return month;
+      return { ...month, paymentBalances, carryIn, balance: sumPaymentBalances(paymentBalances) };
     });
   }, [contributions, currentYear, financialEntries, isBillPaid, ledger, today]);
 
@@ -815,7 +844,7 @@ export function DashboardPage({
       incomeTotal,
       expenseTotal,
       savingsTotal,
-      balance: months.reduce((total, month) => total + month.balance, 0),
+      balance: months.reduce((total, month) => total + month.balance - month.carryIn, 0),
       incomeByPerson,
       expenseByPerson,
       activeMonths: months.filter(
