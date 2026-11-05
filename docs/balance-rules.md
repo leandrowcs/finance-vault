@@ -47,3 +47,7 @@ Atingir o valor alvo não representa consumo do dinheiro. O modelo atual não re
 ## Limites conhecidos
 
 O saldo disponível depende das contas cadastradas, das datas e dos recebimentos informados. O limite transacional de aporte usa a capacidade calculada pelo cliente; não é uma conciliação bancária nem proteção completa contra alterações concorrentes de receitas/contas. Cálculos intermediários usam números JavaScript; rateio e soma dos cartões têm tratamento explícito de centavos.
+
+## Pagamento que cobre o mês seguinte
+
+Quando um pagamento do fim do mês cobre despesas do mês seguinte, o cartão aparece nos dois meses. No mês anterior ele mostra a receita e as despesas até o fim do mês; no mês seguinte, o saldo restante desse cartão entra como receita, somado às despesas do novo mês. O saldo anual subtrai esse valor repassado para não contá-lo duas vezes.
